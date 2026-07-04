@@ -25,6 +25,8 @@ import { SoundManager } from '../utils/soundManager';
 import { getLocalDateString } from '../utils/dateUtils';
 import { getLevelAndProgress } from '../utils/xpUtils';
 import { getTemplateSubjects, COURSE_TEMPLATES } from '../data';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 
 interface FocusTimerProps {
   userState: UserState;
@@ -94,6 +96,104 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
   const [showPausedExitedScreen, setShowPausedExitedScreen] = useState<boolean>(false);
 
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const wakeLockRef = useRef<any>(null);
+
+  const requestWakeLock = async () => {
+    if (!('wakeLock' in navigator)) {
+      console.warn('Screen Wake Lock API not supported on this browser.');
+      return;
+    }
+    try {
+      if (wakeLockRef.current) return;
+      wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+      console.log('Screen Wake Lock successfully acquired.');
+      wakeLockRef.current.addEventListener('release', () => {
+        console.log('Screen Wake Lock released.');
+        wakeLockRef.current = null;
+      });
+    } catch (err: any) {
+      console.warn(`Failed to acquire Screen Wake Lock: ${err.message}`);
+    }
+  };
+
+  const releaseWakeLock = async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+        wakeLockRef.current = null;
+        console.log('Screen Wake Lock manually released.');
+      } catch (err: any) {
+        console.warn(`Failed to release Screen Wake Lock: ${err.message}`);
+      }
+    }
+  };
+
+  // Screen Wake Lock API management
+  useEffect(() => {
+    if (isRunning) {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+    return () => {
+      releaseWakeLock();
+    };
+  }, [isRunning]);
+
+  const scheduleLocalNotification = async (remainingSeconds: number, topicName: string) => {
+    try {
+      if (Capacitor.isPluginAvailable('LocalNotifications')) {
+        // Cancel first to avoid duplication
+        await LocalNotifications.cancel({ notifications: [{ id: 42 }] });
+        
+        const fireDate = new Date(Date.now() + remainingSeconds * 1000);
+        await LocalNotifications.schedule({
+          notifications: [
+            {
+              id: 42,
+              title: '🎯 Focus Session Complete!',
+              body: `Excellent job! Your deep work session for "${topicName}" is complete.`,
+              schedule: { at: fireDate },
+              sound: 'beep.wav',
+              actionTypeId: '',
+              extra: null
+            }
+          ]
+        });
+        console.log('Local Notification scheduled at:', fireDate);
+      }
+    } catch (err) {
+      console.warn('Failed to schedule local notification', err);
+    }
+  };
+
+  const cancelLocalNotification = async () => {
+    try {
+      if (Capacitor.isPluginAvailable('LocalNotifications')) {
+        await LocalNotifications.cancel({ notifications: [{ id: 42 }] });
+        console.log('Scheduled Local Notification cancelled.');
+      }
+    } catch (err) {
+      console.warn('Failed to cancel local notification', err);
+    }
+  };
+
+  // Request Local Notifications permissions on mount
+  useEffect(() => {
+    const requestNotificationPermission = async () => {
+      try {
+        if (Capacitor.isPluginAvailable('LocalNotifications')) {
+          const check = await LocalNotifications.checkPermissions();
+          if (check.display !== 'granted') {
+            await LocalNotifications.requestPermissions();
+          }
+        }
+      } catch (err) {
+        console.warn('LocalNotifications permission request failed', err);
+      }
+    };
+    requestNotificationPermission();
+  }, []);
 
   // Sync initial topic name if launched from a topic card
   useEffect(() => {
@@ -156,7 +256,7 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
       setIsFullscreenActive(isCurrentlyFullscreen);
 
       // If a session has started, and we are NOT in fullscreen, and we are NOT in fallback mode
-      if (totalSeconds > 0 && !isCurrentlyFullscreen && !fullscreenFallbackMode) {
+      if (totalSeconds > 0 && !isCurrentlyFullscreen && !fullscreenFallbackMode && !Capacitor.isNativePlatform()) {
         // Automatically pause the timer!
         setIsRunning(false);
         setShowPausedExitedScreen(true);
@@ -181,6 +281,7 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
     enterFullscreen();
     setIsRunning(true);
     setShowPausedExitedScreen(false);
+    scheduleLocalNotification(remainingSecs, selectedTopicName || "General Study Block");
   };
 
   const handleExitSession = () => {
@@ -192,6 +293,7 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
     setIsRunning(false);
     setShowStopConfirm(false);
     setShowPausedExitedScreen(false);
+    cancelLocalNotification();
   };
 
   const handleFinishSession = () => {
@@ -210,9 +312,11 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
     if (nextRunning) {
       SoundManager.play('timer_start');
       SoundManager.vibrate('light');
+      scheduleLocalNotification(remainingSecs, selectedTopicName || "General Study Block");
     } else {
       SoundManager.play('timer_pause');
       SoundManager.vibrate('light');
+      cancelLocalNotification();
     }
   };
 
@@ -242,7 +346,7 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
         if (data.isRunning) {
           // If was running, let's restore state.
           // Anti-abuse: If they left the tab/browser for a long time (> 30s), we pause the timer automatically.
-          if (elapsedRealTime > 30) {
+          if (elapsedRealTime > 30 && !Capacitor.isNativePlatform()) {
             // Auto-paused while away
             setSecondsElapsed(Math.min(data.secondsElapsed + 5, data.totalSeconds)); // credit 5 seconds grace
             setIsRunning(false);
@@ -291,9 +395,15 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
   // Tab visibility changes: Auto pause on browser leave or screen lock
   useEffect(() => {
     const handleVisibilityChange = () => {
-      if (document.hidden && isRunning) {
-        setIsRunning(false);
-        onTriggerToast("🛡️ Focus Timer Protected", "Focus session auto-paused to protect integrity while you were away.", "info");
+      if (document.hidden && !Capacitor.isNativePlatform()) {
+        if (isRunning) {
+          setIsRunning(false);
+          onTriggerToast("🛡️ Focus Timer Protected", "Focus session auto-paused to protect integrity while you were away.", "info");
+        }
+      } else {
+        if (isRunning) {
+          requestWakeLock();
+        }
       }
     };
 
@@ -349,6 +459,7 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
     localStorage.removeItem(STORAGE_KEY);
     setTotalSeconds(0);
     setSecondsElapsed(0);
+    cancelLocalNotification();
   };
 
   // Helper to credit focused minutes & check daily focus goal completions
@@ -440,12 +551,16 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
       minutes = modeObj ? modeObj.duration : 25;
     }
 
-    setTotalSeconds(minutes * 60);
+    const secs = minutes * 60;
+    setTotalSeconds(secs);
     setSecondsElapsed(0);
     setIsRunning(true);
     lastTickRef.current = Date.now();
     SoundManager.play('timer_start');
     SoundManager.vibrate('light');
+
+    // Schedule background notification
+    scheduleLocalNotification(secs, selectedTopicName || "General Study Block");
 
     // Automatically enter fullscreen!
     setTimeout(() => {
@@ -468,6 +583,7 @@ export const FocusTimer: React.FC<FocusTimerProps> = ({
     setSecondsElapsed(0);
     setIsRunning(false);
     setShowStopConfirm(false);
+    cancelLocalNotification();
   };
 
   // Format digital clock

@@ -25,6 +25,48 @@ import vtu_2025_ise_s6 from './vtu/2025/ise/semester6.json';
 import vtu_2025_ise_s7 from './vtu/2025/ise/semester7.json';
 import vtu_2025_ise_s8 from './vtu/2025/ise/semester8.json';
 
+import vtu_2025_cse_s3 from './vtu/2025/cse/semester3.json';
+import vtu_2025_cse_s4 from './vtu/2025/cse/semester4.json';
+import vtu_2025_cse_s5 from './vtu/2025/cse/semester5.json';
+import vtu_2025_cse_s6 from './vtu/2025/cse/semester6.json';
+import vtu_2025_cse_s7 from './vtu/2025/cse/semester7.json';
+import vtu_2025_cse_s8 from './vtu/2025/cse/semester8.json';
+
+import vtu_2025_aiml_s3 from './vtu/2025/aiml/semester3.json';
+import vtu_2025_aiml_s4 from './vtu/2025/aiml/semester4.json';
+import vtu_2025_aiml_s5 from './vtu/2025/aiml/semester5.json';
+import vtu_2025_aiml_s6 from './vtu/2025/aiml/semester6.json';
+import vtu_2025_aiml_s7 from './vtu/2025/aiml/semester7.json';
+import vtu_2025_aiml_s8 from './vtu/2025/aiml/semester8.json';
+
+import vtu_2025_eee_s3 from './vtu/2025/eee/semester3.json';
+import vtu_2025_eee_s4 from './vtu/2025/eee/semester4.json';
+import vtu_2025_eee_s5 from './vtu/2025/eee/semester5.json';
+import vtu_2025_eee_s6 from './vtu/2025/eee/semester6.json';
+import vtu_2025_eee_s7 from './vtu/2025/eee/semester7.json';
+import vtu_2025_eee_s8 from './vtu/2025/eee/semester8.json';
+
+import vtu_2025_ece_s3 from './vtu/2025/ece/semester3.json';
+import vtu_2025_ece_s4 from './vtu/2025/ece/semester4.json';
+import vtu_2025_ece_s5 from './vtu/2025/ece/semester5.json';
+import vtu_2025_ece_s6 from './vtu/2025/ece/semester6.json';
+import vtu_2025_ece_s7 from './vtu/2025/ece/semester7.json';
+import vtu_2025_ece_s8 from './vtu/2025/ece/semester8.json';
+
+import vtu_2025_iot_s3 from './vtu/2025/iot/semester3.json';
+import vtu_2025_iot_s4 from './vtu/2025/iot/semester4.json';
+import vtu_2025_iot_s5 from './vtu/2025/iot/semester5.json';
+import vtu_2025_iot_s6 from './vtu/2025/iot/semester6.json';
+import vtu_2025_iot_s7 from './vtu/2025/iot/semester7.json';
+import vtu_2025_iot_s8 from './vtu/2025/iot/semester8.json';
+
+import vtu_2025_mechanical_s3 from './vtu/2025/mechanical/semester3.json';
+import vtu_2025_mechanical_s4 from './vtu/2025/mechanical/semester4.json';
+import vtu_2025_mechanical_s5 from './vtu/2025/mechanical/semester5.json';
+import vtu_2025_mechanical_s6 from './vtu/2025/mechanical/semester6.json';
+import vtu_2025_mechanical_s7 from './vtu/2025/mechanical/semester7.json';
+import vtu_2025_mechanical_s8 from './vtu/2025/mechanical/semester8.json';
+
 function normalizeSemesterData(raw: any, fallbackSemester: number): Subject[] {
   if (!raw) return [];
 
@@ -89,7 +131,12 @@ export const COURSE_TEMPLATES: {
       '2025 Scheme': {
         1: COMMON_S1,
         2: COMMON_S2,
-        3: normalizeSemesterData(vtu_2022_cse_s3, 3),
+        3: normalizeSemesterData(vtu_2025_cse_s3, 3),
+        4: normalizeSemesterData(vtu_2025_cse_s4, 4),
+        5: normalizeSemesterData(vtu_2025_cse_s5, 5),
+        6: normalizeSemesterData(vtu_2025_cse_s6, 6),
+        7: normalizeSemesterData(vtu_2025_cse_s7, 7),
+        8: normalizeSemesterData(vtu_2025_cse_s8, 8),
       },
     },
     ISE: {
@@ -118,7 +165,29 @@ export const COURSE_TEMPLATES: {
       '2025 Scheme': {
         1: COMMON_S1,
         2: COMMON_S2,
-        3: normalizeSemesterData(vtu_2022_aiml_s3, 3),
+        3: normalizeSemesterData(vtu_2025_aiml_s3, 3),
+        4: normalizeSemesterData(vtu_2025_aiml_s4, 4),
+        5: normalizeSemesterData(vtu_2025_aiml_s5, 5),
+        6: normalizeSemesterData(vtu_2025_aiml_s6, 6),
+        7: normalizeSemesterData(vtu_2025_aiml_s7, 7),
+        8: normalizeSemesterData(vtu_2025_aiml_s8, 8),
+      },
+    },
+    EEE: {
+      '2022 Scheme': {
+        1: COMMON_S1,
+        2: COMMON_S2,
+        3: normalizeSemesterData(vtu_2025_eee_s3, 3),
+      },
+      '2025 Scheme': {
+        1: COMMON_S1,
+        2: COMMON_S2,
+        3: normalizeSemesterData(vtu_2025_eee_s3, 3),
+        4: normalizeSemesterData(vtu_2025_eee_s4, 4),
+        5: normalizeSemesterData(vtu_2025_eee_s5, 5),
+        6: normalizeSemesterData(vtu_2025_eee_s6, 6),
+        7: normalizeSemesterData(vtu_2025_eee_s7, 7),
+        8: normalizeSemesterData(vtu_2025_eee_s8, 8),
       },
     },
     ECE: {
@@ -130,7 +199,12 @@ export const COURSE_TEMPLATES: {
       '2025 Scheme': {
         1: COMMON_S1,
         2: COMMON_S2,
-        3: normalizeSemesterData(vtu_2022_ece_s3, 3),
+        3: normalizeSemesterData(vtu_2025_ece_s3, 3),
+        4: normalizeSemesterData(vtu_2025_ece_s4, 4),
+        5: normalizeSemesterData(vtu_2025_ece_s5, 5),
+        6: normalizeSemesterData(vtu_2025_ece_s6, 6),
+        7: normalizeSemesterData(vtu_2025_ece_s7, 7),
+        8: normalizeSemesterData(vtu_2025_ece_s8, 8),
       },
     },
     IOT: {
@@ -142,7 +216,29 @@ export const COURSE_TEMPLATES: {
       '2025 Scheme': {
         1: COMMON_S1,
         2: COMMON_S2,
+        3: normalizeSemesterData(vtu_2025_iot_s3, 3),
+        4: normalizeSemesterData(vtu_2025_iot_s4, 4),
+        5: normalizeSemesterData(vtu_2025_iot_s5, 5),
+        6: normalizeSemesterData(vtu_2025_iot_s6, 6),
+        7: normalizeSemesterData(vtu_2025_iot_s7, 7),
+        8: normalizeSemesterData(vtu_2025_iot_s8, 8),
+      },
+    },
+    Mechanical: {
+      '2022 Scheme': {
+        1: COMMON_S1,
+        2: COMMON_S2,
         3: normalizeSemesterData(vtu_2022_cse_s3, 3),
+      },
+      '2025 Scheme': {
+        1: COMMON_S1,
+        2: COMMON_S2,
+        3: normalizeSemesterData(vtu_2025_mechanical_s3, 3),
+        4: normalizeSemesterData(vtu_2025_mechanical_s4, 4),
+        5: normalizeSemesterData(vtu_2025_mechanical_s5, 5),
+        6: normalizeSemesterData(vtu_2025_mechanical_s6, 6),
+        7: normalizeSemesterData(vtu_2025_mechanical_s7, 7),
+        8: normalizeSemesterData(vtu_2025_mechanical_s8, 8),
       },
     },
   },
