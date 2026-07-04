@@ -4,7 +4,7 @@ import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signInWithPo
 import { auth, googleProvider } from '../lib/firebase';
 
 export default function AuthPopupScreen() {
-  const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
+  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('loading');
   const [errorMsg, setErrorMsg] = useState('');
   const [isPartitionError, setIsPartitionError] = useState(false);
 
@@ -118,14 +118,26 @@ export default function AuthPopupScreen() {
           return;
         }
 
-        // 3. If neither, trigger standard Google Sign-In redirect immediately!
+        // 3. Instead of redirecting automatically, set status to idle to let the user sign in with popup
         if (active) {
-          await signInWithRedirect(auth, googleProvider);
+          setStatus('idle');
         }
       } catch (err: any) {
         console.error("Popup Authentication Error:", err);
         if (active) {
-          handleAuthError(err);
+          const msg = err.message || String(err);
+          const errCode = err.code || "";
+          const isBenign = 
+            errCode === "auth/missing-initial-state" || 
+            msg.toLowerCase().includes("missing-initial-state") || 
+            msg.toLowerCase().includes("missing initial state") ||
+            msg.toLowerCase().includes("sessionstorage");
+
+          if (isBenign) {
+            setStatus('idle');
+          } else {
+            handleAuthError(err);
+          }
         }
       }
     };
@@ -147,6 +159,51 @@ export default function AuthPopupScreen() {
         <div className="mx-auto w-12 h-12 rounded-xl bg-blue-600 flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.3)] animate-pulse">
           <BookOpen className="w-6 h-6 text-white" />
         </div>
+
+        {status === 'idle' && (
+          <div className="space-y-5 animate-fade-in">
+            <div>
+              <h2 className="text-base font-bold text-white tracking-tight">Connect your Account</h2>
+              <p className="text-xs text-gray-400 mt-2 leading-relaxed">
+                Click below to sign in securely with Google and link this preview session.
+              </p>
+            </div>
+
+            <button
+              onClick={startPopupSignIn}
+              className="w-full py-2.5 bg-white hover:bg-gray-100 active:scale-98 text-gray-900 text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-md"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path
+                  fill="#4285F4"
+                  d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.61c-.29 1.5-.1.14 1.14-1.2l3.99 3.09c2.34-2.15 3.68-5.32 3.68-8.74z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 24c3.24 0 5.97-1.08 7.96-2.91l-3.89-3.02c-1.08.72-2.45 1.16-4.07 1.16-3.14 0-5.8-2.11-6.75-4.96L1.31 17.3c2 3.97 6.1 6.7 10.69 6.7z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.25 14.27a7.22 7.22 0 0 1 0-4.54V6.64H1.31a11.96 11.96 0 0 0 0 10.72l3.94-3.09z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.44-3.44C17.96 1.19 15.24 0 12 0 7.41 0 3.31 2.73 1.31 6.7l3.94 3.09c.95-2.85 3.61-4.96 6.75-4.96z"
+                />
+              </svg>
+              <span>Continue with Google</span>
+            </button>
+
+            <div className="pt-1">
+              <button
+                onClick={startRedirectSignIn}
+                className="text-[10px] text-gray-500 hover:text-gray-400 underline transition-all cursor-pointer"
+              >
+                Trouble? Try Google Redirect Method
+              </button>
+            </div>
+          </div>
+        )}
 
         {status === 'loading' && (
           <div className="space-y-4">

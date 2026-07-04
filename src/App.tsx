@@ -131,6 +131,8 @@ export default function App() {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('pair_code');
     if (code) {
+      // Save it to localStorage as a backup so it automatically prompts them after login/onboarding
+      localStorage.setItem('pending_pair_code', code);
       setPendingPairCode(code);
       setIsPairingModalOpen(true);
       
@@ -139,6 +141,41 @@ export default function App() {
       window.history.replaceState({}, document.title, newUrl);
     }
   }, []);
+
+  // Monitor user state transitions to automatically trigger pending pairing codes
+  useEffect(() => {
+    if (userState && userState.uid && !pairingSuccess && !isPairingLoading) {
+      const savedCode = localStorage.getItem('pending_pair_code') || pendingPairCode;
+      if (savedCode) {
+        setPendingPairCode(savedCode);
+        localStorage.removeItem('pending_pair_code');
+        
+        // AUTOMATIC SILENT LINKING FLOW - Completely bypasses manual click confirmations!
+        const autoSilentPair = async () => {
+          setIsPairingLoading(true);
+          try {
+            await linkDeviceWithAccount(savedCode, userState.uid, userState);
+            setPairingSuccess(true);
+            setToast({
+              title: "📱 Google Login Synced!",
+              message: "Your mobile device has been linked successfully.",
+              type: "success"
+            });
+            setTimeout(() => {
+              setIsPairingModalOpen(false);
+              setPendingPairCode(null);
+              setPairingSuccess(false);
+            }, 5000);
+          } catch (err: any) {
+            console.error("Auto silent pairing failed:", err);
+          } finally {
+            setIsPairingLoading(false);
+          }
+        };
+        autoSilentPair();
+      }
+    }
+  }, [userState, pendingPairCode, pairingSuccess, isPairingLoading]);
 
   // Semester manual transition states
   const [isSemTransitionOpen, setIsSemTransitionOpen] = useState(false);
@@ -619,6 +656,44 @@ export default function App() {
   const isAuthPopup = typeof window !== 'undefined' && window.location.search.includes('auth_popup=true');
   if (isAuthPopup) {
     return <AuthPopupScreen />;
+  }
+
+  // If we are currently completing an automatic silent device pairing from Google Login
+  if (pendingPairCode && userState && userState.uid) {
+    return (
+      <div className="min-h-screen bg-[#060809] flex flex-col items-center justify-center p-6 text-center">
+        <div className="max-w-md w-full bg-[#0D1115] border border-gray-800 rounded-2xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+          
+          <div className="mx-auto w-16 h-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+            <Check className="w-8 h-8 animate-bounce" />
+          </div>
+
+          <div className="space-y-2">
+            <h3 className="text-2xl font-bold text-white tracking-tight font-display">Google Sign-In Successful!</h3>
+            <p className="text-sm text-gray-400 leading-relaxed">
+              You have successfully signed in with your Google Account <span className="text-blue-400 font-mono">({userState.email})</span>.
+            </p>
+          </div>
+
+          <div className="p-4 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-3">
+            <p className="text-xs text-blue-300 font-medium">
+              We have completed the secure connection on your mobile device.
+            </p>
+            <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
+              <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+              <span>Syncing login state...</span>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <p className="text-xs text-gray-500 leading-relaxed">
+              You can now safely close this browser window and return to the StudyOS app on your phone!
+            </p>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (isLoading) {
