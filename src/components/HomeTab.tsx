@@ -676,6 +676,13 @@ export default function HomeTab({
         )}
       </div>
 
+      {/* Android Widget Companion Panel */}
+      <AndroidWidgetSimulator
+        userState={userState}
+        onStartRecommended={recommendation ? () => onStartTopic(recommendation.topic.id) : undefined}
+        onOpenFocusTimer={onOpenFocusTimer}
+      />
+
       {/* Choose Something Else Trigger Button */}
       <div className="text-center pt-2" id="secondary-action-container">
         <button

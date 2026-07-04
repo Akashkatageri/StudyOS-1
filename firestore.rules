@@ -108,5 +108,10 @@ service cloud.firestore {
     match /users/{userId}/resources/{moduleId}/{document=**} {
       allow read, write: if isOwner(userId);
     }
+
+    // 11. device_links/{code} for native Android Google Auth pairing
+    match /device_links/{code} {
+      allow read, write: if true;
+    }
   }
 }
