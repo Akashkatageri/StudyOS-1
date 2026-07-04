@@ -42,9 +42,13 @@ jobs:
 
       - name: Regenerate Gradle Wrapper Freshly
         run: |
-          cd android
-          rm -f gradle/wrapper/gradle-wrapper.jar
+          mkdir -p /tmp/gradle-fresh
+          cd /tmp/gradle-fresh
+          touch settings.gradle
           gradle wrapper --gradle-version 8.14.3
+          cd $GITHUB_WORKSPACE
+          rm -f android/gradle/wrapper/gradle-wrapper.jar
+          cp /tmp/gradle-fresh/gradle/wrapper/gradle-wrapper.jar android/gradle/wrapper/gradle-wrapper.jar
 
       - name: Make Gradle Wrapper Executable and Sanitize Line Endings
         run: |
