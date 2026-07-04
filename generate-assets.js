@@ -220,6 +220,12 @@ async function run() {
   fs.writeFileSync(path.join(srcAssetsDir, 'logo.svg'), SVG_WITH_BG);
   await compilePng(SVG_WITH_BG, path.join(srcAssetsDir, 'logo.png'), 512);
 
+  // Also write copies directly to the project root directory as 'logo.png' and 'apk_logo.png'
+  // so the user can easily find and access it after downloading and extracting the ZIP!
+  const rootDir = process.cwd();
+  await compilePng(SVG_WITH_BG, path.join(rootDir, 'logo.png'), 512);
+  await compilePng(SVG_WITH_BG, path.join(rootDir, 'apk_logo.png'), 512);
+
   console.log('--- ALL ASSETS GENERATED SUCCESSFULLY ---');
 }
 
