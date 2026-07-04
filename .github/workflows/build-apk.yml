@@ -42,6 +42,7 @@ jobs:
 
       - name: Regenerate Gradle Wrapper
         run: |
+          rm -f android/gradle/wrapper/gradle-wrapper.jar
           cd android
           gradle wrapper --gradle-version 8.14.3
 
