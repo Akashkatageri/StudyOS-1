@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Capacitor } from '@capacitor/core';
-import logoPng from '../assets/logo.png';
-import logoSvg from '../assets/logo.svg';
+import AppLogo from './AppLogo';
 import { 
   BookOpen, 
   ChevronRight, 
@@ -109,7 +108,6 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
   const [redirectWarning, setRedirectWarning] = useState<string | null>(null);
   const [usernameSubmitError, setUsernameSubmitError] = useState<string | null>(null);
   const [isSubmittingUsername, setIsSubmittingUsername] = useState(false);
-  const [logoError, setLogoError] = useState(false);
 
   const [cachedUser, setCachedUser] = useState<any | null>(null);
 
@@ -443,10 +441,12 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
       // Outside an iframe: Standard popup Auth selection page
       let result;
       try {
+        googleProvider.setCustomParameters({ prompt: 'select_account' });
         result = await signInWithPopup(auth, googleProvider);
       } catch (err: any) {
         if (err.code === 'auth/popup-blocked' || err.message?.includes('popup-blocked')) {
           console.warn("Google Sign-In popup blocked. Falling back to Redirect...");
+          googleProvider.setCustomParameters({ prompt: 'select_account' });
           await signInWithRedirect(auth, googleProvider);
           return;
         }
@@ -641,25 +641,7 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
               >
                 {/* App Brand Icon */}
                 <div className="mx-auto w-20 h-20 rounded-3xl overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.3)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 border border-blue-400/20">
-                  {!logoError ? (
-                    <img 
-                      src={logoPng} 
-                      alt="StudyOS Logo" 
-                      className="w-full h-full object-cover animate-fade-in"
-                      referrerPolicy="no-referrer"
-                      onError={() => {
-                        console.warn("logoPng failed to load, falling back to logoSvg");
-                        setLogoError(true);
-                      }}
-                    />
-                  ) : (
-                    <img 
-                      src={logoSvg} 
-                      alt="StudyOS Logo" 
-                      className="w-full h-full p-2.5 object-contain animate-fade-in"
-                      referrerPolicy="no-referrer"
-                    />
-                  )}
+                  <AppLogo className="w-full h-full animate-fade-in" />
                 </div>
 
                 <div className="space-y-2">

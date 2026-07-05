@@ -3,7 +3,7 @@ import { Loader2, CheckCircle2, AlertCircle, BookOpen } from 'lucide-react';
 import { signInWithRedirect, getRedirectResult, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
-import logoPng from '../assets/logo.png';
+import AppLogo from './AppLogo';
 
 export default function AuthPopupScreen() {
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('loading');
@@ -74,6 +74,7 @@ export default function AuthPopupScreen() {
     setErrorMsg('');
     setIsPartitionError(false);
     try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
       await signInWithRedirect(auth, googleProvider);
     } catch (err: any) {
       console.error("Popup Redirect Trigger Error:", err);
@@ -86,6 +87,7 @@ export default function AuthPopupScreen() {
     setErrorMsg('');
     setIsPartitionError(false);
     try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, googleProvider);
       if (result && result.user) {
         await handleAuthSuccess(result.user);
@@ -177,12 +179,7 @@ export default function AuthPopupScreen() {
       <div className="w-full max-w-sm bg-[#141A1F] rounded-3xl border border-gray-800 p-8 space-y-6 shadow-2xl relative z-10">
         {/* Brand */}
         <div className="mx-auto w-16 h-16 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 border border-blue-400/20">
-          <img 
-            src={logoPng} 
-            alt="StudyOS Logo" 
-            className="w-full h-full object-cover"
-            referrerPolicy="no-referrer"
-          />
+          <AppLogo className="w-full h-full" />
         </div>
 
         {status === 'idle' && (
