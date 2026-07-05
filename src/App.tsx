@@ -143,6 +143,7 @@ export default function App() {
   const [hasPendingRequests, setHasPendingRequests] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
   const [reconnectCount, setReconnectCount] = useState(0);
+  const [isCloudSyncUnavailable, setIsCloudSyncUnavailable] = useState(false);
 
   // Device Pairing State (Option A)
   const [pendingPairCode, setPendingPairCode] = useState<string | null>(null);
@@ -458,127 +459,181 @@ export default function App() {
     };
   }, []);
 
-  // 1e. Enhanced Android/Web Network & Background Resume Sync engine
+  // Ref to track if the App component is mounted
+  const isMountedRef = useRef(true);
   useEffect(() => {
-    let active = true;
-    let appListener: any = null;
-    let netListener: any = null;
-
-    // Helper to get network status natively or from browser
-    const getIsConnected = async (): Promise<boolean> => {
-      try {
-        const status = await Network.getStatus();
-        return status.connected;
-      } catch (e) {
-        return navigator.onLine;
-      }
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
     };
+  }, []);
 
-    // Main synchronization and reconnect function
-    const performSyncOnReconnect = async () => {
-      const currentState = userStateRef.current;
-      if (!currentState || !currentState.uid || !currentState.onboarded) {
-        console.log("[StudyOS Network] Sync skipped: user is not authenticated or onboarded.");
-        return;
+  // Helper to get network status natively or from browser
+  const getIsConnected = async (): Promise<boolean> => {
+    try {
+      const status = await Network.getStatus();
+      console.log(`[StudyOS Network] Native getStatus: connected=${status.connected}`);
+      return status.connected;
+    } catch (e) {
+      console.log(`[StudyOS Network] Standard navigator.onLine check: connected=${navigator.onLine}`);
+      return navigator.onLine;
+    }
+  };
+
+  // Main synchronization and reconnect function
+  const performSyncOnReconnect = async () => {
+    const currentState = userStateRef.current;
+    if (!currentState || !currentState.uid || !currentState.onboarded) {
+      console.log("[StudyOS Network] Sync skipped: user is not authenticated or onboarded yet.");
+      return;
+    }
+
+    const hasInternet = await getIsConnected();
+    if (!hasInternet) {
+      console.log("[StudyOS Network] Sync skipped: network is offline.");
+      if (currentState && !currentState.isOffline) {
+        const offlineState = {
+          ...currentState,
+          isOffline: true
+        };
+        setUserState(offlineState);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(offlineState));
       }
+      setIsCloudSyncUnavailable(false);
+      return;
+    }
 
-      const hasInternet = await getIsConnected();
-      if (!hasInternet) {
-        console.log("[StudyOS Network] Sync skipped: network is offline.");
-        return;
-      }
+    console.log("⚡ [StudyOS Network] Reconnection/Resume detected. Running cloud recovery...");
 
-      console.log("⚡ [StudyOS Network] Reconnection/Resume detected. Running cloud recovery...");
-
+    try {
+      // 1. Force enable Firestore network & trigger retries of pending writes/listens
       try {
-        // 1. Force enable Firestore network & trigger retries of pending writes/listens
-        try {
-          await enableNetwork(db);
-          console.log("[StudyOS Network] Firestore network enabled.");
-        } catch (dbErr) {
-          console.warn("[StudyOS Network] Could not explicitly enable Firestore network:", dbErr);
-        }
-
-        // 2. Refresh Firebase Auth if needed (forces reconnection & updates auth token)
-        if (auth.currentUser) {
-          try {
-            await auth.currentUser.getIdToken(true);
-            console.log("[StudyOS Network] Firebase Auth token refreshed.");
-          } catch (authErr) {
-            console.warn("[StudyOS Network] Could not force refresh Auth token:", authErr);
-          }
-        }
-
-        // 3. Load user profile and study stats from Firestore
-        const cloudData = await loadUserFromFirestore(currentState.uid);
-        if (!active) return;
-
-        if (cloudData) {
-          // Merge local offline progress into cloud data to prevent any data loss
-          const merged = mergeLocalAndCloudStates(currentState, cloudData);
-          const updatedState = {
-            ...merged,
-            isOffline: false,
-          };
-          
-          setUserState(updatedState);
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
-
-          // Trigger a silent sync to cloud just to make sure Firestore is fully updated with any offline changes
-          await syncUserToFirestore(currentState.uid, updatedState);
-
-          setToast({
-            title: "📶 Back Online",
-            message: "Your internet connection is restored! Your progress has been successfully merged and synchronized with the cloud.",
-            type: "success"
-          });
-        }
-
-        // Increment reconnectCount to force-rebuild any active subscriptions
-        setReconnectCount(prev => prev + 1);
-
-        // 4. Dispatch a custom global event to refresh friends, notifications, and leaderboard data
-        console.log("[StudyOS Network] Broadcasting app-resume-sync to all active tabs...");
-        window.dispatchEvent(new CustomEvent('app-resume-sync'));
-
-      } catch (err) {
-        console.warn("[StudyOS Network] Failed to automatically synchronize with cloud database on reconnect:", err);
+        await enableNetwork(db);
+        console.log("[StudyOS Network] Firestore network enabled successfully.");
+      } catch (dbErr) {
+        console.warn("[StudyOS Network] Could not explicitly enable Firestore network:", dbErr);
       }
-    };
 
-    // Handle network state transitions
-    const handleNetworkChange = async (connected: boolean) => {
-      if (!active) return;
-      console.log(`[StudyOS Network] Connection state changed to: ${connected ? 'ONLINE' : 'OFFLINE'}`);
-
-      if (connected) {
-        await performSyncOnReconnect();
-      } else {
-        // We are offline. Transition Firestore to offline and update userState isOffline parameter.
+      // 2. Refresh Firebase Auth if needed (forces reconnection & updates auth token)
+      if (auth.currentUser) {
         try {
-          await disableNetwork(db);
-          console.log("[StudyOS Network] Firestore network disabled.");
-        } catch (dbErr) {
-          console.warn("[StudyOS Network] Could not explicitly disable Firestore network:", dbErr);
+          await auth.currentUser.getIdToken(true);
+          console.log("[StudyOS Network] Firebase Auth token refreshed successfully.");
+        } catch (authErr) {
+          console.warn("[StudyOS Network] Could not force refresh Auth token:", authErr);
         }
+      }
 
-        const currentState = userStateRef.current;
-        if (currentState && !currentState.isOffline) {
-          const offlineState = {
-            ...currentState,
-            isOffline: true
-          };
-          setUserState(offlineState);
-          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(offlineState));
-        }
+      // 3. Load user profile and study stats from Firestore
+      console.log("[StudyOS Network] Fetching latest profile from Firestore for UID:", currentState.uid);
+      const cloudData = await loadUserFromFirestore(currentState.uid);
+      if (!isMountedRef.current) return;
+
+      if (cloudData) {
+        console.log("[StudyOS Network] Profile loaded from Firestore. Merging local progress...");
+        // Merge local offline progress into cloud data to prevent any data loss
+        const merged = mergeLocalAndCloudStates(currentState, cloudData);
+        const updatedState = {
+          ...merged,
+          isOffline: false,
+        };
+        
+        setUserState(updatedState);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
+
+        // Trigger a silent sync to cloud just to make sure Firestore is fully updated with any offline changes
+        await syncUserToFirestore(currentState.uid, updatedState);
 
         setToast({
-          title: "📶 Offline Mode Active",
-          message: "You are currently disconnected. You can continue studying offline; your progress will synchronize once you're back online.",
-          type: "info"
+          title: "📶 Back Online",
+          message: "Your internet connection is restored! Your progress has been successfully merged and synchronized with the cloud.",
+          type: "success"
         });
+      } else {
+        console.log("[StudyOS Network] No cloud profile found, but connected to internet. Setting isOffline=false.");
+        if (currentState.isOffline) {
+          const updatedState = {
+            ...currentState,
+            isOffline: false,
+          };
+          setUserState(updatedState);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
+        }
       }
-    };
+
+      // Reset the cloud sync unavailable flag since everything succeeded
+      setIsCloudSyncUnavailable(false);
+
+      // Increment reconnectCount to force-rebuild any active subscriptions
+      setReconnectCount(prev => prev + 1);
+
+      // 4. Dispatch a custom global event to refresh friends, notifications, and leaderboard data
+      console.log("[StudyOS Network] Broadcasting app-resume-sync to all active tabs...");
+      window.dispatchEvent(new CustomEvent('app-resume-sync'));
+
+    } catch (err) {
+      console.warn("[StudyOS Network] Failed to automatically synchronize with cloud database on reconnect:", err);
+      
+      // Set cloud sync flag to unavailable since the device is online but we can't sync to the cloud
+      setIsCloudSyncUnavailable(true);
+
+      // Critical Fail-Safe: If we verified we have internet, but the Firestore load itself threw an error (e.g., temporary Firestore network glitch),
+      // we should still reset the isOffline banner if the browser says we are online, to avoid locking the UI in a stale "No internet connection detected" state.
+      if (currentState.isOffline) {
+        console.log("[StudyOS Network] Internet is active despite Firestore load error. Clearing offline banner and enabling cloud sync error indicator.");
+        const updatedState = {
+          ...currentState,
+          isOffline: false,
+        };
+        setUserState(updatedState);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
+      }
+    }
+  };
+
+  // Handle network state transitions
+  const handleNetworkChange = async (connected: boolean) => {
+    if (!isMountedRef.current) return;
+    console.log(`[StudyOS Network] Connection state changed to: ${connected ? 'ONLINE' : 'OFFLINE'}`);
+
+    if (connected) {
+      await performSyncOnReconnect();
+    } else {
+      // We are offline. Transition Firestore to offline and update userState isOffline parameter.
+      try {
+        await disableNetwork(db);
+        console.log("[StudyOS Network] Firestore network disabled.");
+      } catch (dbErr) {
+        console.warn("[StudyOS Network] Could not explicitly disable Firestore network:", dbErr);
+      }
+
+      const currentState = userStateRef.current;
+      if (currentState && !currentState.isOffline) {
+        console.log("[StudyOS Network] Transitioning state to offline.");
+        const offlineState = {
+          ...currentState,
+          isOffline: true
+        };
+        setUserState(offlineState);
+        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(offlineState));
+      }
+
+      // If physically offline, reset the cloud sync failure state since the main offline banner takes priority
+      setIsCloudSyncUnavailable(false);
+
+      setToast({
+        title: "📶 Offline Mode Active",
+        message: "You are currently disconnected. You can continue studying offline; your progress will synchronize once you're back online.",
+        type: "info"
+      });
+    }
+  };
+
+  // 1e. Enhanced Android/Web Network & Background Resume Sync engine
+  useEffect(() => {
+    let appListener: any = null;
+    let netListener: any = null;
+    let browserCleanup: (() => void) | undefined;
 
     // Setup Capacitor and browser listeners
     const setupListeners = async () => {
@@ -597,7 +652,8 @@ export default function App() {
         try {
           // Listen for App Resume (coming from background)
           appListener = await CapApp.addListener('appStateChange', async (state) => {
-            if (state.isActive && active) {
+            console.log(`[StudyOS Lifecycle] App state changed. isActive=${state.isActive}`);
+            if (state.isActive && isMountedRef.current) {
               console.log("[StudyOS Lifecycle] App resumed from background. Triggering network and sync check...");
               await performSyncOnReconnect();
             }
@@ -605,13 +661,15 @@ export default function App() {
 
           // Listen for Network changes
           netListener = await Network.addListener('networkStatusChange', async (status) => {
-            if (active) {
+            console.log(`[StudyOS Network] Native network status change: connected=${status.connected}`);
+            if (isMountedRef.current) {
               await handleNetworkChange(status.connected);
             }
           });
 
           // Run initial check
           const status = await Network.getStatus();
+          console.log(`[StudyOS Network] Initial Native connection check: connected=${status.connected}`);
           if (status.connected) {
             await performSyncOnReconnect();
           } else {
@@ -623,15 +681,18 @@ export default function App() {
       } else {
         // Browser Fallback listeners
         const handleOnline = () => {
-          if (active) performSyncOnReconnect();
+          console.log("[StudyOS Network] Browser online event fired.");
+          if (isMountedRef.current) performSyncOnReconnect();
         };
 
         const handleOffline = () => {
-          if (active) handleNetworkChange(false);
+          console.log("[StudyOS Network] Browser offline event fired.");
+          if (isMountedRef.current) handleNetworkChange(false);
         };
 
         const handleVisibility = () => {
-          if (document.visibilityState === 'visible' && active) {
+          console.log(`[StudyOS Network] Browser visibility change: state=${document.visibilityState}`);
+          if (document.visibilityState === 'visible' && isMountedRef.current) {
             performSyncOnReconnect();
           }
         };
@@ -647,7 +708,7 @@ export default function App() {
           handleNetworkChange(false);
         }
 
-        return () => {
+        browserCleanup = () => {
           window.removeEventListener('online', handleOnline);
           window.removeEventListener('offline', handleOffline);
           document.removeEventListener('visibilitychange', handleVisibility);
@@ -655,13 +716,9 @@ export default function App() {
       }
     };
 
-    let browserCleanup: (() => void) | undefined;
-    setupListeners().then((cleanup) => {
-      if (cleanup) browserCleanup = cleanup;
-    });
+    setupListeners();
 
     return () => {
-      active = false;
       if (appListener) {
         appListener.remove();
       }
@@ -674,6 +731,14 @@ export default function App() {
     };
   }, []);
 
+  // 1f. Proactive connection/sync check when userState transitions to authenticated & onboarded
+  useEffect(() => {
+    if (userState && userState.uid && userState.onboarded) {
+      console.log("[StudyOS Network] User state loaded or updated. Proactively validating connection status for cloud sync...");
+      performSyncOnReconnect();
+    }
+  }, [userState?.uid, userState?.onboarded]);
+
   // 1c. Real-time synchronisation of UserState to Firestore with debouncing
   useEffect(() => {
     if (userState && userState.uid && userState.onboarded) {
@@ -681,9 +746,18 @@ export default function App() {
       syncAndroidWidget(userState);
 
       const timer = setTimeout(() => {
-        syncUserToFirestore(userState.uid!, userState).catch(err => {
-          console.error("Real-time cloud synchronization error:", err);
-        });
+        syncUserToFirestore(userState.uid!, userState)
+          .then(() => {
+            setIsCloudSyncUnavailable(false);
+          })
+          .catch(err => {
+            console.error("Real-time cloud synchronization error:", err);
+            getIsConnected().then(hasInternet => {
+              if (hasInternet) {
+                setIsCloudSyncUnavailable(true);
+              }
+            });
+          });
       }, 800);
       return () => clearTimeout(timer);
     }
@@ -1498,6 +1572,13 @@ export default function App() {
         <div id="offline-banner" className="bg-amber-500/10 border-b border-amber-500/10 px-4 py-2 flex items-center justify-center gap-2 text-xs font-semibold text-amber-400 select-none backdrop-blur-md">
           <WifiOff className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
           <span>No internet connection detected. Working in offline mode (changes will sync once you are back online).</span>
+        </div>
+      )}
+
+      {isCloudSyncUnavailable && !userState.isOffline && (
+        <div id="sync-warning-banner" className="bg-orange-500/10 border-b border-orange-500/10 px-4 py-2 flex items-center justify-center gap-2 text-xs font-semibold text-orange-400 select-none backdrop-blur-md">
+          <AlertCircle className="w-3.5 h-3.5 text-orange-500 animate-pulse" />
+          <span>Cloud sync temporarily unavailable. Retrying...</span>
         </div>
       )}
 
