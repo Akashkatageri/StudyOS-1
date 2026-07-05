@@ -19,8 +19,11 @@ import TopicViewModal from './components/TopicViewModal';
 import CompletionAnimations from './components/CompletionAnimations';
 import BadgeUnlockModal from './components/BadgeUnlockModal';
 import { getUnlockedAchievementIds, ACHIEVEMENT_DEFS } from './utils/achievements';
-import { auth, syncUserToFirestore, triggerSocialMilestone, loadUserFromFirestore, registerUserProfileTransaction, subscribeFriendRequests, subscribeNotifications, linkDeviceWithAccount, mergeLocalAndCloudStates } from './lib/firebase';
+import { auth, db, syncUserToFirestore, triggerSocialMilestone, loadUserFromFirestore, registerUserProfileTransaction, subscribeFriendRequests, subscribeNotifications, linkDeviceWithAccount, mergeLocalAndCloudStates } from './lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { enableNetwork, disableNetwork } from 'firebase/firestore';
+import { App as CapApp } from '@capacitor/app';
+import { Network } from '@capacitor/network';
 import { getSubjectsForCycle } from './utils/cycleSubjects';
 import { SoundManager } from './utils/soundManager';
 import { getLocalDateString } from './utils/dateUtils';
@@ -139,6 +142,7 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; title: string; type: 'success' | 'warning' | 'info' | 'error' } | null>(null);
   const [hasPendingRequests, setHasPendingRequests] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
+  const [reconnectCount, setReconnectCount] = useState(0);
 
   // Device Pairing State (Option A)
   const [pendingPairCode, setPendingPairCode] = useState<string | null>(null);
@@ -454,18 +458,58 @@ export default function App() {
     };
   }, []);
 
-  // 1e. Auto-reconnection & background resume synchronization
+  // 1e. Enhanced Android/Web Network & Background Resume Sync engine
   useEffect(() => {
     let active = true;
+    let appListener: any = null;
+    let netListener: any = null;
 
-    const performSyncOnReconnect = async () => {
-      // Access the latest state safely using our ref
-      const currentState = userStateRef.current;
-      if (!currentState || !currentState.uid || !currentState.onboarded) return;
-
-      console.log("Internet connection detected or app resumed. Checking cloud state...");
-      
+    // Helper to get network status natively or from browser
+    const getIsConnected = async (): Promise<boolean> => {
       try {
+        const status = await Network.getStatus();
+        return status.connected;
+      } catch (e) {
+        return navigator.onLine;
+      }
+    };
+
+    // Main synchronization and reconnect function
+    const performSyncOnReconnect = async () => {
+      const currentState = userStateRef.current;
+      if (!currentState || !currentState.uid || !currentState.onboarded) {
+        console.log("[StudyOS Network] Sync skipped: user is not authenticated or onboarded.");
+        return;
+      }
+
+      const hasInternet = await getIsConnected();
+      if (!hasInternet) {
+        console.log("[StudyOS Network] Sync skipped: network is offline.");
+        return;
+      }
+
+      console.log("⚡ [StudyOS Network] Reconnection/Resume detected. Running cloud recovery...");
+
+      try {
+        // 1. Force enable Firestore network & trigger retries of pending writes/listens
+        try {
+          await enableNetwork(db);
+          console.log("[StudyOS Network] Firestore network enabled.");
+        } catch (dbErr) {
+          console.warn("[StudyOS Network] Could not explicitly enable Firestore network:", dbErr);
+        }
+
+        // 2. Refresh Firebase Auth if needed (forces reconnection & updates auth token)
+        if (auth.currentUser) {
+          try {
+            await auth.currentUser.getIdToken(true);
+            console.log("[StudyOS Network] Firebase Auth token refreshed.");
+          } catch (authErr) {
+            console.warn("[StudyOS Network] Could not force refresh Auth token:", authErr);
+          }
+        }
+
+        // 3. Load user profile and study stats from Firestore
         const cloudData = await loadUserFromFirestore(currentState.uid);
         if (!active) return;
 
@@ -489,41 +533,144 @@ export default function App() {
             type: "success"
           });
         }
+
+        // Increment reconnectCount to force-rebuild any active subscriptions
+        setReconnectCount(prev => prev + 1);
+
+        // 4. Dispatch a custom global event to refresh friends, notifications, and leaderboard data
+        console.log("[StudyOS Network] Broadcasting app-resume-sync to all active tabs...");
+        window.dispatchEvent(new CustomEvent('app-resume-sync'));
+
       } catch (err) {
-        console.warn("Failed to automatically synchronize with cloud database on reconnect:", err);
+        console.warn("[StudyOS Network] Failed to automatically synchronize with cloud database on reconnect:", err);
       }
     };
 
-    const handleOnline = () => {
-      performSyncOnReconnect();
-    };
+    // Handle network state transitions
+    const handleNetworkChange = async (connected: boolean) => {
+      if (!active) return;
+      console.log(`[StudyOS Network] Connection state changed to: ${connected ? 'ONLINE' : 'OFFLINE'}`);
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // App resumed or tab selected. Check if we're offline but navigator.onLine is true.
-        const currentState = userStateRef.current;
-        if (currentState && currentState.isOffline && navigator.onLine) {
-          performSyncOnReconnect();
+      if (connected) {
+        await performSyncOnReconnect();
+      } else {
+        // We are offline. Transition Firestore to offline and update userState isOffline parameter.
+        try {
+          await disableNetwork(db);
+          console.log("[StudyOS Network] Firestore network disabled.");
+        } catch (dbErr) {
+          console.warn("[StudyOS Network] Could not explicitly disable Firestore network:", dbErr);
         }
+
+        const currentState = userStateRef.current;
+        if (currentState && !currentState.isOffline) {
+          const offlineState = {
+            ...currentState,
+            isOffline: true
+          };
+          setUserState(offlineState);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(offlineState));
+        }
+
+        setToast({
+          title: "📶 Offline Mode Active",
+          message: "You are currently disconnected. You can continue studying offline; your progress will synchronize once you're back online.",
+          type: "info"
+        });
       }
     };
 
-    window.addEventListener('online', handleOnline);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    // Also do a proactive connection check if we boot/resume and think we are offline but navigator says online
-    const initialCheck = setTimeout(() => {
-      const currentState = userStateRef.current;
-      if (currentState && currentState.isOffline && navigator.onLine) {
-        performSyncOnReconnect();
+    // Setup Capacitor and browser listeners
+    const setupListeners = async () => {
+      let isNativelySupported = false;
+      try {
+        // Test if the App and Network plugins are supported and available
+        const appInfo = await CapApp.getInfo();
+        const initialStatus = await Network.getStatus();
+        console.log("[StudyOS Network] Capacitor App & Network plugins available natively.", appInfo, initialStatus);
+        isNativelySupported = true;
+      } catch (e) {
+        console.log("[StudyOS Network] Capacitor plugins not available natively. Falling back to browser standard APIs.");
       }
-    }, 1500);
+
+      if (isNativelySupported) {
+        try {
+          // Listen for App Resume (coming from background)
+          appListener = await CapApp.addListener('appStateChange', async (state) => {
+            if (state.isActive && active) {
+              console.log("[StudyOS Lifecycle] App resumed from background. Triggering network and sync check...");
+              await performSyncOnReconnect();
+            }
+          });
+
+          // Listen for Network changes
+          netListener = await Network.addListener('networkStatusChange', async (status) => {
+            if (active) {
+              await handleNetworkChange(status.connected);
+            }
+          });
+
+          // Run initial check
+          const status = await Network.getStatus();
+          if (status.connected) {
+            await performSyncOnReconnect();
+          } else {
+            await handleNetworkChange(false);
+          }
+        } catch (err) {
+          console.error("[StudyOS Network] Error setting up native Capacitor listeners:", err);
+        }
+      } else {
+        // Browser Fallback listeners
+        const handleOnline = () => {
+          if (active) performSyncOnReconnect();
+        };
+
+        const handleOffline = () => {
+          if (active) handleNetworkChange(false);
+        };
+
+        const handleVisibility = () => {
+          if (document.visibilityState === 'visible' && active) {
+            performSyncOnReconnect();
+          }
+        };
+
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        document.addEventListener('visibilitychange', handleVisibility);
+
+        // Initial standard check
+        if (navigator.onLine) {
+          performSyncOnReconnect();
+        } else {
+          handleNetworkChange(false);
+        }
+
+        return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+          document.removeEventListener('visibilitychange', handleVisibility);
+        };
+      }
+    };
+
+    let browserCleanup: (() => void) | undefined;
+    setupListeners().then((cleanup) => {
+      if (cleanup) browserCleanup = cleanup;
+    });
 
     return () => {
       active = false;
-      window.removeEventListener('online', handleOnline);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      clearTimeout(initialCheck);
+      if (appListener) {
+        appListener.remove();
+      }
+      if (netListener) {
+        netListener.remove();
+      }
+      if (browserCleanup) {
+        browserCleanup();
+      }
     };
   }, []);
 

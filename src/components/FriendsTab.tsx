@@ -82,6 +82,7 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
   const [privacySettingsOpen, setPrivacySettingsOpen] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   
   // Leaderboard filters
   const [leaderboardCategory, setLeaderboardCategory] = useState<
@@ -131,7 +132,7 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
     }
   };
 
-  // Setup live listeners on login status change
+  // Setup live listeners on login status change or app reconnection/resume events
   useEffect(() => {
     // Always load public directory and leaderboard metrics on mount or login change
     loadDirectoryAndFriends();
@@ -163,7 +164,20 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
       unsubSent();
       unsubNotifications();
     };
-  }, [userState.uid]);
+  }, [userState.uid, refreshTrigger]);
+
+  // Setup app resume/reconnection listener to force refresh
+  useEffect(() => {
+    const handleResumeSync = () => {
+      console.log("[FriendsTab] App resume or network reconnect detected. Refreshing directory, friends list, and notifications...");
+      setRefreshTrigger(prev => prev + 1);
+    };
+
+    window.addEventListener('app-resume-sync', handleResumeSync);
+    return () => {
+      window.removeEventListener('app-resume-sync', handleResumeSync);
+    };
+  }, []);
 
   // Perform search locally across public profiles for lightning-fast feedback
   useEffect(() => {
