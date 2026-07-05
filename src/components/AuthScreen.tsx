@@ -195,6 +195,20 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
             return;
           }
 
+          // CRITICAL CAPACITOR ANDROID FIX: If we are in pairing mode on Chrome browser,
+          // immediately complete auth with onboarded: false to return control to the Capacitor app.
+          const hasPairCode = typeof window !== 'undefined' && !!localStorage.getItem('pending_pair_code');
+          if (hasPairCode) {
+            onAuthCompleteRef.current({
+              uid,
+              email,
+              displayName,
+              isOffline: false,
+              onboarded: false
+            });
+            return;
+          }
+
           setAuthData({ uid, email, displayName });
 
           // Generate suggested username from display name
@@ -242,6 +256,10 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
 
   // Monitor initial parent state sync
   useEffect(() => {
+    // CRITICAL CAPACITOR ANDROID FIX: Do not switch to username step in pairing mode!
+    const hasPairCode = typeof window !== 'undefined' && !!localStorage.getItem('pending_pair_code');
+    if (hasPairCode) return;
+
     if (step === 'welcome' && initialUser && initialUser.uid && !initialUser.username) {
       setAuthData({
         uid: initialUser.uid,
@@ -344,12 +362,25 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
                   fullState: cloudData
                 });
               } else {
-                setAuthData({ uid, email, displayName });
-                const base = (displayName || email || "user")
-                  .toLowerCase()
-                  .replace(/[^a-z0-9_]/g, '');
-                setUsername(base.slice(0, 15));
-                setStep('username');
+                // CRITICAL CAPACITOR ANDROID FIX: If we are in pairing mode on Chrome browser,
+                // immediately complete auth with onboarded: false to return control to the Capacitor app.
+                const hasPairCode = typeof window !== 'undefined' && !!localStorage.getItem('pending_pair_code');
+                if (hasPairCode) {
+                  onAuthComplete({
+                    uid,
+                    email,
+                    displayName,
+                    isOffline: false,
+                    onboarded: false
+                  });
+                } else {
+                  setAuthData({ uid, email, displayName });
+                  const base = (displayName || email || "user")
+                    .toLowerCase()
+                    .replace(/[^a-z0-9_]/g, '');
+                  setUsername(base.slice(0, 15));
+                  setStep('username');
+                }
               }
             } else {
               throw new Error("No user profile received after popup authorization.");
@@ -478,6 +509,20 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
           username: cloudData.username,
           onboarded: true,
           fullState: cloudData
+        });
+        return;
+      }
+
+      // CRITICAL CAPACITOR ANDROID FIX: If we are in pairing mode on Chrome browser,
+      // immediately complete auth with onboarded: false to return control to the Capacitor app.
+      const hasPairCode = typeof window !== 'undefined' && !!localStorage.getItem('pending_pair_code');
+      if (hasPairCode) {
+        onAuthComplete({
+          uid,
+          email,
+          displayName,
+          isOffline: false,
+          onboarded: false
         });
         return;
       }
