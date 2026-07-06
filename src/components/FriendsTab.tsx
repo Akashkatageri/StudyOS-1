@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Users, 
   Search as SearchIcon, 
@@ -84,6 +84,10 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
   const [isSyncing, setIsSyncing] = useState(false);
   const [showNotificationCenter, setShowNotificationCenter] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+
+  const unsubReceivedRef = useRef<(() => void) | null>(null);
+  const unsubSentRef = useRef<(() => void) | null>(null);
+  const unsubNotificationsRef = useRef<(() => void) | null>(null);
   
   // Leaderboard filters
   const [leaderboardCategory, setLeaderboardCategory] = useState<
@@ -133,39 +137,81 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
     }
   };
 
-  // Setup live listeners on login status change or app reconnection/resume events
+  // Always load public directory and leaderboard metrics on mount, login, or reconnect/resume events
   useEffect(() => {
-    // Always load public directory and leaderboard metrics on mount or login change
     loadDirectoryAndFriends();
+  }, [userState.uid, refreshTrigger]);
 
+  // Setup live snapshot listeners on user login status change
+  useEffect(() => {
     if (!userState.uid) {
       setReceivedRequests([]);
       setSentRequests([]);
       setNotifications([]);
+
+      if (unsubReceivedRef.current) {
+        unsubReceivedRef.current();
+        unsubReceivedRef.current = null;
+      }
+      if (unsubSentRef.current) {
+        unsubSentRef.current();
+        unsubSentRef.current = null;
+      }
+      if (unsubNotificationsRef.current) {
+        unsubNotificationsRef.current();
+        unsubNotificationsRef.current = null;
+      }
       return;
     }
 
+    console.log(`[StudyOS Trace] [FriendsTab Subscriptions] Setting up listeners for UID: ${userState.uid}`);
+
     // Subscribe to incoming friend requests
-    const unsubReceived = subscribeFriendRequests(userState.uid, (requests) => {
+    if (unsubReceivedRef.current) {
+      console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubReceivedRef already exists, cleaning up first...");
+      unsubReceivedRef.current();
+      unsubReceivedRef.current = null;
+    }
+    unsubReceivedRef.current = subscribeFriendRequests(userState.uid, (requests) => {
       setReceivedRequests(requests);
     });
 
     // Subscribe to outgoing friend requests
-    const unsubSent = subscribeSentRequests(userState.uid, (requests) => {
+    if (unsubSentRef.current) {
+      console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubSentRef already exists, cleaning up first...");
+      unsubSentRef.current();
+      unsubSentRef.current = null;
+    }
+    unsubSentRef.current = subscribeSentRequests(userState.uid, (requests) => {
       setSentRequests(requests);
     });
 
     // Subscribe to system notifications
-    const unsubNotifications = subscribeNotifications(userState.uid, (notifs) => {
+    if (unsubNotificationsRef.current) {
+      console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubNotificationsRef already exists, cleaning up first...");
+      unsubNotificationsRef.current();
+      unsubNotificationsRef.current = null;
+    }
+    unsubNotificationsRef.current = subscribeNotifications(userState.uid, (notifs) => {
       setNotifications(notifs);
     });
 
     return () => {
-      unsubReceived();
-      unsubSent();
-      unsubNotifications();
+      console.log("[StudyOS Trace] [FriendsTab Subscriptions] Cleaning up listeners...");
+      if (unsubReceivedRef.current) {
+        unsubReceivedRef.current();
+        unsubReceivedRef.current = null;
+      }
+      if (unsubSentRef.current) {
+        unsubSentRef.current();
+        unsubSentRef.current = null;
+      }
+      if (unsubNotificationsRef.current) {
+        unsubNotificationsRef.current();
+        unsubNotificationsRef.current = null;
+      }
     };
-  }, [userState.uid, refreshTrigger]);
+  }, [userState.uid]);
 
   // Setup app resume/reconnection listener to force refresh
   useEffect(() => {

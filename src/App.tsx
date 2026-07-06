@@ -155,6 +155,10 @@ export default function App() {
     authInitializedRef.current = authInitialized;
   }, [authInitialized]);
 
+  const syncInProgressRef = useRef(false);
+  const unsubRequestsRef = useRef<(() => void) | null>(null);
+  const unsubNotificationsRef = useRef<(() => void) | null>(null);
+
   const [isCloudSyncUnavailable, setIsCloudSyncUnavailableInternal] = useState(false);
   const setIsCloudSyncUnavailable = (val: boolean) => {
     console.log(`[StudyOS Trace] setIsCloudSyncUnavailable called: value=${val}`);
@@ -600,107 +604,143 @@ export default function App() {
 
   // Main synchronization and reconnect function
   const performSyncOnReconnect = async () => {
+    if (syncInProgressRef.current) {
+      console.log("[StudyOS Trace] performSyncOnReconnect: Sync already in progress, skipping concurrent trigger.");
+      return;
+    }
+    syncInProgressRef.current = true;
     console.log("[StudyOS Trace] performSyncOnReconnect started");
     console.log(`[StudyOS Trace] [performSyncOnReconnect Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
 
-    if (!authInitializedRef.current) {
-      console.log("[StudyOS Trace] performSyncOnReconnect skipped because auth not initialized");
-      return;
-    }
-
-    if (!auth.currentUser) {
-      console.log("[StudyOS Trace] performSyncOnReconnect skipped because auth.currentUser is null");
-      return;
-    }
-
-    const currentState = userStateRef.current;
-    if (!currentState || !currentState.uid) {
-      console.log("[StudyOS Trace] performSyncOnReconnect skipped because userState does not exist or has no UID");
-      return;
-    }
-
-    if (!currentState.onboarded) {
-      console.log("[StudyOS Trace] performSyncOnReconnect skipped because onboarding is not completed");
-      return;
-    }
-
-    console.log("[StudyOS Trace] performSyncOnReconnect executed after authentication");
-    console.log("[StudyOS Trace] performSyncOnReconnect executing");
-
-    const hasInternet = await getIsConnected();
-    console.log(`[StudyOS Trace] performSyncOnReconnect connection check outcome: hasInternet=${hasInternet}`);
-    if (!hasInternet) {
-      console.log("[StudyOS Trace] performSyncOnReconnect skipped: network is offline.");
-      if (currentState && !currentState.isOffline) {
-        console.log("[StudyOS Trace] performSyncOnReconnect: Transitioning userState isOffline=true due to detected offline state.");
-        const offlineState = {
-          ...currentState,
-          isOffline: true
-        };
-        setUserState(offlineState);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(offlineState));
-      }
-      setIsCloudSyncUnavailable(false);
-      return;
-    }
-
-    console.log("⚡ [StudyOS Trace] Reconnection/Resume active. Running cloud recovery...");
-
     try {
-      // 1. Force enable Firestore network & trigger retries of pending writes/listens
-      try {
-        console.log("[StudyOS Trace] Calling enableNetwork(db) to explicitly connect Firestore...");
-        await enableNetwork(db);
-        console.log("[StudyOS Trace] Firestore network enabled");
-      } catch (dbErr: any) {
-        console.warn(`[StudyOS Trace] enableNetwork(db) FAILED: ${dbErr?.message || dbErr}`);
-      }
-
-      // 2. Refresh Firebase Auth if needed (forces reconnection & updates auth token)
-      if (auth.currentUser) {
-        try {
-          console.log("[StudyOS Trace] Calling auth.currentUser.getIdToken(true) to force token refresh...");
-          await auth.currentUser.getIdToken(true);
-          console.log("[StudyOS Trace] auth.currentUser.getIdToken(true) SUCCEEDED.");
-        } catch (authErr: any) {
-          console.warn(`[StudyOS Trace] auth.currentUser.getIdToken(true) FAILED: ${authErr?.message || authErr}`);
-        }
-      } else {
-        console.log("[StudyOS Trace] performSyncOnReconnect: auth.currentUser is null. Skipping token refresh.");
-      }
-
-      // 3. Load user profile and study stats from Firestore
-      console.log(`[StudyOS Trace] performSyncOnReconnect: Loading profile from Firestore for UID: ${currentState.uid}`);
-      const cloudData = await loadUserFromFirestore(currentState.uid);
-      if (!isMountedRef.current) {
-        console.log("[StudyOS Trace] performSyncOnReconnect: App unmounted mid-sync. Aborting state update.");
+      if (!authInitializedRef.current) {
+        console.log("[StudyOS Trace] performSyncOnReconnect skipped because auth not initialized");
         return;
       }
 
-      if (cloudData) {
-        console.log("[StudyOS Trace] performSyncOnReconnect: Cloud profile found. Merging local progress...");
-        // Merge local offline progress into cloud data to prevent any data loss
-        const merged = mergeLocalAndCloudStates(currentState, cloudData);
-        const updatedState = {
-          ...merged,
-          isOffline: false,
-        };
+      if (!auth.currentUser) {
+        console.log("[StudyOS Trace] performSyncOnReconnect skipped because auth.currentUser is null");
+        return;
+      }
+
+      const currentState = userStateRef.current;
+      if (!currentState || !currentState.uid) {
+        console.log("[StudyOS Trace] performSyncOnReconnect skipped because userState does not exist or has no UID");
+        return;
+      }
+
+      if (!currentState.onboarded) {
+        console.log("[StudyOS Trace] performSyncOnReconnect skipped because onboarding is not completed");
+        return;
+      }
+
+      console.log("[StudyOS Trace] performSyncOnReconnect executed after authentication");
+      console.log("[StudyOS Trace] performSyncOnReconnect executing");
+
+      const hasInternet = await getIsConnected();
+      console.log(`[StudyOS Trace] performSyncOnReconnect connection check outcome: hasInternet=${hasInternet}`);
+      if (!hasInternet) {
+        console.log("[StudyOS Trace] performSyncOnReconnect skipped: network is offline.");
+        if (currentState && !currentState.isOffline) {
+          console.log("[StudyOS Trace] performSyncOnReconnect: Transitioning userState isOffline=true due to detected offline state.");
+          const offlineState = {
+            ...currentState,
+            isOffline: true
+          };
+          setUserState(offlineState);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(offlineState));
+        }
+        setIsCloudSyncUnavailable(false);
+        return;
+      }
+
+      console.log("⚡ [StudyOS Trace] Reconnection/Resume active. Running cloud recovery...");
+
+      try {
+        // 1. Force enable Firestore network & trigger retries of pending writes/listens
+        try {
+          console.log("[StudyOS Trace] Calling enableNetwork(db) to explicitly connect Firestore...");
+          await enableNetwork(db);
+          console.log("[StudyOS Trace] Firestore network enabled");
+        } catch (dbErr: any) {
+          console.warn(`[StudyOS Trace] enableNetwork(db) FAILED: ${dbErr?.message || dbErr}`);
+        }
+
+        // 2. Refresh Firebase Auth if needed (forces reconnection & updates auth token)
+        if (auth.currentUser) {
+          try {
+            console.log("[StudyOS Trace] Calling auth.currentUser.getIdToken(true) to force token refresh...");
+            await auth.currentUser.getIdToken(true);
+            console.log("[StudyOS Trace] auth.currentUser.getIdToken(true) SUCCEEDED.");
+          } catch (authErr: any) {
+            console.warn(`[StudyOS Trace] auth.currentUser.getIdToken(true) FAILED: ${authErr?.message || authErr}`);
+          }
+        } else {
+          console.log("[StudyOS Trace] performSyncOnReconnect: auth.currentUser is null. Skipping token refresh.");
+        }
+
+        // 3. Load user profile and study stats from Firestore
+        console.log(`[StudyOS Trace] performSyncOnReconnect: Loading profile from Firestore for UID: ${currentState.uid}`);
+        const cloudData = await loadUserFromFirestore(currentState.uid);
+        if (!isMountedRef.current) {
+          console.log("[StudyOS Trace] performSyncOnReconnect: App unmounted mid-sync. Aborting state update.");
+          return;
+        }
+
+        if (cloudData) {
+          console.log("[StudyOS Trace] performSyncOnReconnect: Cloud profile found. Merging local progress...");
+          // Merge local offline progress into cloud data to prevent any data loss
+          const merged = mergeLocalAndCloudStates(currentState, cloudData);
+          const updatedState = {
+            ...merged,
+            isOffline: false,
+          };
+          
+          setUserState(updatedState);
+          localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
+
+          // Trigger a silent sync to cloud just to make sure Firestore is fully updated with any offline changes
+          console.log("[StudyOS Trace] performSyncOnReconnect: Triggering silent cloud sync write...");
+          await syncUserToFirestore(currentState.uid, updatedState);
+
+          setToast({
+            title: "📶 Back Online",
+            message: "Your internet connection is restored! Your progress has been successfully merged and synchronized with the cloud.",
+            type: "success"
+          });
+        } else {
+          console.log("[StudyOS Trace] performSyncOnReconnect: No cloud profile found, but online. Setting isOffline=false.");
+          if (currentState.isOffline) {
+            const updatedState = {
+              ...currentState,
+              isOffline: false,
+            };
+            setUserState(updatedState);
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
+          }
+        }
+
+        // Reset the cloud sync unavailable flag since everything succeeded
+        setIsCloudSyncUnavailable(false);
+
+        // Increment reconnectCount to force-rebuild any active subscriptions
+        setReconnectCount(prev => prev + 1);
+
+        // 4. Dispatch a custom global event to refresh friends, notifications, and leaderboard data
+        console.log("[StudyOS Trace] performSyncOnReconnect complete. Broadcasting app-resume-sync to active tabs.");
+        window.dispatchEvent(new CustomEvent('app-resume-sync'));
+        console.log("[StudyOS Trace] performSyncOnReconnect completed");
+
+      } catch (err: any) {
+        console.warn(`[StudyOS Trace] performSyncOnReconnect FAILED: ${err?.message || err}`);
         
-        setUserState(updatedState);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
+        // Set cloud sync flag to unavailable since the device is online but we can't sync to the cloud
+        setIsCloudSyncUnavailable(true);
 
-        // Trigger a silent sync to cloud just to make sure Firestore is fully updated with any offline changes
-        console.log("[StudyOS Trace] performSyncOnReconnect: Triggering silent cloud sync write...");
-        await syncUserToFirestore(currentState.uid, updatedState);
-
-        setToast({
-          title: "📶 Back Online",
-          message: "Your internet connection is restored! Your progress has been successfully merged and synchronized with the cloud.",
-          type: "success"
-        });
-      } else {
-        console.log("[StudyOS Trace] performSyncOnReconnect: No cloud profile found, but online. Setting isOffline=false.");
+        // Critical Fail-Safe: If we verified we have internet, but the Firestore load itself threw an error (e.g., temporary Firestore network glitch),
+        // we should still reset the isOffline banner if the browser says we are online, to avoid locking the UI in a stale "No internet connection detected" state.
         if (currentState.isOffline) {
+          console.log("[StudyOS Trace] performSyncOnReconnect fail-safe triggered. Internet active but Firestore load failed. Clearing offline banner.");
           const updatedState = {
             ...currentState,
             isOffline: false,
@@ -708,37 +748,10 @@ export default function App() {
           setUserState(updatedState);
           localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
         }
+        console.log("[StudyOS Trace] performSyncOnReconnect completed");
       }
-
-      // Reset the cloud sync unavailable flag since everything succeeded
-      setIsCloudSyncUnavailable(false);
-
-      // Increment reconnectCount to force-rebuild any active subscriptions
-      setReconnectCount(prev => prev + 1);
-
-      // 4. Dispatch a custom global event to refresh friends, notifications, and leaderboard data
-      console.log("[StudyOS Trace] performSyncOnReconnect complete. Broadcasting app-resume-sync to active tabs.");
-      window.dispatchEvent(new CustomEvent('app-resume-sync'));
-      console.log("[StudyOS Trace] performSyncOnReconnect completed");
-
-    } catch (err: any) {
-      console.warn(`[StudyOS Trace] performSyncOnReconnect FAILED: ${err?.message || err}`);
-      
-      // Set cloud sync flag to unavailable since the device is online but we can't sync to the cloud
-      setIsCloudSyncUnavailable(true);
-
-      // Critical Fail-Safe: If we verified we have internet, but the Firestore load itself threw an error (e.g., temporary Firestore network glitch),
-      // we should still reset the isOffline banner if the browser says we are online, to avoid locking the UI in a stale "No internet connection detected" state.
-      if (currentState.isOffline) {
-        console.log("[StudyOS Trace] performSyncOnReconnect fail-safe triggered. Internet active but Firestore load failed. Clearing offline banner.");
-        const updatedState = {
-          ...currentState,
-          isOffline: false,
-        };
-        setUserState(updatedState);
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
-      }
-      console.log("[StudyOS Trace] performSyncOnReconnect completed");
+    } finally {
+      syncInProgressRef.current = false;
     }
   };
 
@@ -976,20 +989,52 @@ export default function App() {
     if (!userState || !userState.uid) {
       setHasPendingRequests(false);
       setHasUnreadNotifs(false);
+      
+      if (unsubRequestsRef.current) {
+        console.log("[StudyOS Trace] [App Subscriptions] Cleaning up unsubRequestsRef because user logged out...");
+        unsubRequestsRef.current();
+        unsubRequestsRef.current = null;
+      }
+      if (unsubNotificationsRef.current) {
+        console.log("[StudyOS Trace] [App Subscriptions] Cleaning up unsubNotificationsRef because user logged out...");
+        unsubNotificationsRef.current();
+        unsubNotificationsRef.current = null;
+      }
       return;
     }
 
-    const unsubRequests = subscribeFriendRequests(userState.uid, (requests) => {
+    console.log(`[StudyOS Trace] [App Subscriptions] Setting up listeners for UID: ${userState.uid}`);
+
+    // Store incoming friend requests listener with check
+    if (unsubRequestsRef.current) {
+      console.log("[StudyOS Trace] [App Subscriptions] unsubRequestsRef already exists, cleaning up first...");
+      unsubRequestsRef.current();
+      unsubRequestsRef.current = null;
+    }
+    unsubRequestsRef.current = subscribeFriendRequests(userState.uid, (requests) => {
       setHasPendingRequests(requests.length > 0);
     });
 
-    const unsubNotifications = subscribeNotifications(userState.uid, (notifs) => {
+    // Store system notifications listener with check
+    if (unsubNotificationsRef.current) {
+      console.log("[StudyOS Trace] [App Subscriptions] unsubNotificationsRef already exists, cleaning up first...");
+      unsubNotificationsRef.current();
+      unsubNotificationsRef.current = null;
+    }
+    unsubNotificationsRef.current = subscribeNotifications(userState.uid, (notifs) => {
       setHasUnreadNotifs(notifs.some(n => !n.read));
     });
 
     return () => {
-      unsubRequests();
-      unsubNotifications();
+      console.log("[StudyOS Trace] [App Subscriptions] Cleaning up listeners...");
+      if (unsubRequestsRef.current) {
+        unsubRequestsRef.current();
+        unsubRequestsRef.current = null;
+      }
+      if (unsubNotificationsRef.current) {
+        unsubNotificationsRef.current();
+        unsubNotificationsRef.current = null;
+      }
     };
   }, [userState?.uid]);
 
