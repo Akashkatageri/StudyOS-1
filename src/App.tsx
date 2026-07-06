@@ -350,6 +350,9 @@ export default function App() {
   // Log authInitialized changes
   useEffect(() => {
     console.log(`[StudyOS Trace] authInitialized changed to: ${authInitialized}`);
+    if (authInitialized) {
+      console.log("[StudyOS Trace] authInitialized = true");
+    }
   }, [authInitialized]);
 
   // 1. Unified Initial State Load and Firebase Auth Listener
@@ -359,14 +362,19 @@ export default function App() {
     let initTimeout: NodeJS.Timeout | null = null;
     let isFirstCallback = true;
     
-    console.log("[StudyOS Trace] Subscribing to Firebase onAuthStateChanged listener...");
+    console.log("[StudyOS Trace] Firebase Auth listener registered");
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (authUnsubscribed) {
         console.log("[StudyOS Trace] onAuthStateChanged ignored: listener has been unsubscribed.");
         return;
       }
 
-      console.log(`[StudyOS Trace] onAuthStateChanged fired. firebaseUser: ${firebaseUser ? `UID=${firebaseUser.uid} (email=${firebaseUser.email})` : 'null'}`);
+      if (firebaseUser) {
+        console.log("[StudyOS Trace] onAuthStateChanged(firebaseUser)");
+        console.log(`[StudyOS Trace] auth.currentUser UID: ${firebaseUser.uid}`);
+      } else {
+        console.log("[StudyOS Trace] onAuthStateChanged(null)");
+      }
 
       // Helper function to handle authenticated user state
       const handleUserAuthenticated = async (user: any) => {
@@ -423,13 +431,13 @@ export default function App() {
           let local = cached ? JSON.parse(cached) : null;
 
           if (local && local.username && local.uid === user.uid) {
-            console.log(`[StudyOS Trace] onAuthStateChanged: Cache matches. Restoring cached state. isOffline=${isOffline}, local.isOffline=${local.isOffline}`);
+            console.log(`[StudyOS Trace] onAuthStateChanged: Cache matches. Restoring cached state. isOffline=${isOffline}`);
             const updatedLocal: UserState = {
               ...local,
               uid: user.uid,
               email: user.email || undefined,
               displayName: user.displayName || local.displayName || undefined,
-              isOffline: isOffline || local.isOffline === true, // Keep offline if already was offline
+              isOffline: isOffline, // Physical connectivity controls this
             };
             setUserState(updatedLocal);
           } else {
@@ -462,7 +470,7 @@ export default function App() {
                 parsed.inProgressTopics = [];
               }
               // Restore and set offline status based strictly on actual physical connectivity and cached status
-              parsed.isOffline = isOffline || parsed.isOffline === true;
+              parsed.isOffline = isOffline; // Only physical connectivity controls this
               setUserState(parsed);
             } else {
               console.log("[StudyOS Trace] onAuthStateChanged: Cache does not contain an onboarded/offline user. Clearing state.");
@@ -485,25 +493,19 @@ export default function App() {
           if (firebaseUser) {
             console.log("[StudyOS Trace] Firebase initialization completed (User authenticated immediately)");
             await handleUserAuthenticated(firebaseUser);
+            console.log("[StudyOS Trace] authInitialized = true");
             setAuthInitialized(true);
             setIsLoading(false);
           } else {
-            const cached = localStorage.getItem(LOCAL_STORAGE_KEY);
-            if (cached) {
-              console.log("[StudyOS Trace] onAuthStateChanged received initial null callback but local cache exists. Starting 1000ms delay to check for restored session...");
-              initTimeout = setTimeout(async () => {
-                if (authUnsubscribed) return;
-                console.log("[StudyOS Trace] Firebase initialization completed (No restored session detected after 1000ms timeout)");
-                handleUserUnauthenticated();
-                setAuthInitialized(true);
-                setIsLoading(false);
-              }, 1000);
-            } else {
-              console.log("[StudyOS Trace] Firebase initialization completed (No cached session, unauthenticated)");
+            console.log("[StudyOS Trace] onAuthStateChanged received initial null callback. Starting 1000ms delay to check for restored session...");
+            initTimeout = setTimeout(async () => {
+              if (authUnsubscribed) return;
+              console.log("[StudyOS Trace] Firebase initialization completed (No restored session detected after 1000ms timeout)");
               handleUserUnauthenticated();
+              console.log("[StudyOS Trace] authInitialized = true");
               setAuthInitialized(true);
               setIsLoading(false);
-            }
+            }, 1000);
           }
         } else {
           if (initTimeout) {
@@ -514,11 +516,13 @@ export default function App() {
           if (firebaseUser) {
             console.log("[StudyOS Trace] Firebase auth state transitioned to authenticated.");
             await handleUserAuthenticated(firebaseUser);
+            console.log("[StudyOS Trace] authInitialized = true");
             setAuthInitialized(true);
             setIsLoading(false);
           } else {
             console.log("[StudyOS Trace] Firebase auth state transitioned to unauthenticated.");
             handleUserUnauthenticated();
+            console.log("[StudyOS Trace] authInitialized = true");
             setAuthInitialized(true);
             setIsLoading(false);
           }
@@ -586,6 +590,7 @@ export default function App() {
     }
 
     console.log("[StudyOS Trace] performSyncOnReconnect executed after authentication");
+    console.log("[StudyOS Trace] performSyncOnReconnect executing");
 
     const hasInternet = await getIsConnected();
     console.log(`[StudyOS Trace] performSyncOnReconnect connection check outcome: hasInternet=${hasInternet}`);
@@ -679,6 +684,7 @@ export default function App() {
       // 4. Dispatch a custom global event to refresh friends, notifications, and leaderboard data
       console.log("[StudyOS Trace] performSyncOnReconnect complete. Broadcasting app-resume-sync to active tabs.");
       window.dispatchEvent(new CustomEvent('app-resume-sync'));
+      console.log("[StudyOS Trace] performSyncOnReconnect completed");
 
     } catch (err: any) {
       console.warn(`[StudyOS Trace] performSyncOnReconnect FAILED: ${err?.message || err}`);
@@ -697,8 +703,27 @@ export default function App() {
         setUserState(updatedState);
         localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedState));
       }
+      console.log("[StudyOS Trace] performSyncOnReconnect completed");
     }
   };
+
+  // Trigger performSyncOnReconnect exactly once after BOTH authInitialized is true and auth.currentUser is not null
+  const hasTriggeredInitialSync = useRef(false);
+  useEffect(() => {
+    console.log(`[StudyOS Trace] Initial sync check: authInitialized=${authInitialized}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}`);
+    if (authInitialized && auth.currentUser) {
+      if (!hasTriggeredInitialSync.current) {
+        hasTriggeredInitialSync.current = true;
+        console.log("[StudyOS Trace] authInitialized is true and auth.currentUser is not null. Triggering initial sync...");
+        console.log(`[StudyOS Trace] auth.currentUser UID: ${auth.currentUser.uid}`);
+        performSyncOnReconnect();
+      }
+    } else {
+      if (!auth.currentUser) {
+        hasTriggeredInitialSync.current = false;
+      }
+    }
+  }, [authInitialized, userState?.uid]);
 
   // Handle network state transitions
   const handleNetworkChange = async (connected: boolean) => {
