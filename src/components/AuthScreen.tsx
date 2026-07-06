@@ -77,51 +77,115 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
   useEffect(() => {
     if (step !== 'pairing' || !pairingCode) return;
 
+    console.log(`[TRACER] [useEffect] Setting up device pairing listener for code: "${pairingCode}"`);
+
     const unsubscribe = listenToDevicePairing(
       pairingCode,
       async (uid, userState, encryptedIdToken, encryptedAccessToken) => {
-        console.log("[PAIRING] Device paired successfully on Firestore! UID:", uid);
+        console.log("[TRACER] [onPair Callback] Fired with arguments:", {
+          uid,
+          hasUserState: !!userState,
+          hasEncryptedIdToken: !!encryptedIdToken,
+          hasEncryptedAccessToken: !!encryptedAccessToken
+        });
         
         const pairingKey = localStorage.getItem('pairing_key');
+        console.log("[TRACER] [onPair Callback] Local storage check: pairing_key exists =", !!pairingKey);
+
         let localAuthSuccess = false;
 
         if (encryptedIdToken && pairingKey) {
           try {
-            console.log("[PAIRING] Decrypting credentials...");
+            console.log("[TRACER] [Decrypt] Attempting to decrypt ID token and Access token using pairing key...");
             const idToken = decryptData(encryptedIdToken, pairingKey);
             const accessToken = encryptedAccessToken ? decryptData(encryptedAccessToken, pairingKey) : null;
             
+            console.log("[TRACER] [Decrypt] Result:", {
+              idTokenDecrypted: !!idToken,
+              accessTokenDecrypted: !!accessToken
+            });
+
             if (idToken) {
-              console.log("[PAIRING] Attempting local Firebase auth sign-in via signInWithCredential...");
+              console.log("[TRACER] [Credential] Calling GoogleAuthProvider.credential()...");
               const credential = GoogleAuthProvider.credential(idToken, accessToken || undefined);
+              console.log("[TRACER] [Credential] GoogleAuthProvider.credential() returned successfully:", !!credential);
               
-              console.log("[PAIRING] BEFORE signInWithCredential call.");
-              const result = await signInWithCredential(auth, credential);
-              console.log("[PAIRING] AFTER signInWithCredential call. User logged in:", result.user.uid);
-              localAuthSuccess = true;
+              console.log("[TRACER] [SignIn] Entering signInWithCredential()...");
+
+              // Setup a timeout to detect if signInWithCredential is hanging
+              let resolved = false;
+              const hangTimer = setTimeout(() => {
+                if (!resolved) {
+                  console.warn("[TRACER] [SignIn] signInWithCredential is currently hanging! It has not resolved or rejected after 8 seconds.");
+                }
+              }, 8000);
+
+              try {
+                console.log("[TRACER] [SignIn] BEFORE await signInWithCredential call.");
+                const result = await signInWithCredential(auth, credential);
+                resolved = true;
+                clearTimeout(hangTimer);
+                
+                console.log("[TRACER] [SignIn] signInWithCredential resolved successfully!", {
+                  uid: result.user.uid,
+                  email: result.user.email,
+                  displayName: result.user.displayName
+                });
+                console.log("[TRACER] [SignIn] auth.currentUser.uid after success:", auth.currentUser?.uid);
+                localAuthSuccess = true;
+              } catch (authErr: any) {
+                resolved = true;
+                clearTimeout(hangTimer);
+                console.error("[TRACER] [SignIn] signInWithCredential failed with error! DETAILS:", {
+                  code: authErr?.code,
+                  message: authErr?.message,
+                  stack: authErr?.stack,
+                  rawError: authErr
+                });
+                throw authErr; // rethrow to hit the outer catch block
+              }
             } else {
-              console.error("[PAIRING] Failed to decrypt ID token.");
+              console.error("[TRACER] [Decrypt] Decrypted ID token is empty or null!");
             }
           } catch (authErr: any) {
-            console.error("[PAIRING] Local Firebase authentication failed inside WebView:", authErr);
+            console.error("[TRACER] [Exception] Local Firebase authentication flow failed inside WebView:", {
+              code: authErr?.code,
+              message: authErr?.message,
+              stack: authErr?.stack,
+              rawError: authErr
+            });
           }
         } else {
-          console.warn("[PAIRING] Missing encrypted tokens or pairing key in WebView. Local Firebase Auth cannot be established.", {
+          console.warn("[TRACER] [Warning] Missing encrypted tokens or pairing key in WebView. Local Firebase Auth cannot be established.", {
             hasToken: !!encryptedIdToken,
             hasKey: !!pairingKey
           });
         }
 
         // Clean up pairing key
+        console.log("[TRACER] [Cleanup] Removing pairing_key from localStorage");
         localStorage.removeItem('pairing_key');
 
         // Delete the pairing document immediately for security
         try {
-          console.log("[PAIRING] Deleting pairing bridge document from Firestore...");
+          console.log("[TRACER] [Firestore] Deleting pairing bridge document from Firestore for code:", pairingCode);
           await deleteDoc(doc(db, "device_links", pairingCode));
-        } catch (delErr) {
-          console.warn("[PAIRING] Failed to delete pairing document:", delErr);
+          console.log("[TRACER] [Firestore] Pairing bridge document deleted successfully.");
+        } catch (delErr: any) {
+          console.warn("[TRACER] [Firestore] Failed to delete pairing document:", {
+            code: delErr?.code,
+            message: delErr?.message,
+            stack: delErr?.stack
+          });
         }
+
+        console.log("[TRACER] [onAuthComplete] Invoking onAuthCompleteRef.current with:", {
+          uid,
+          email: userState?.email,
+          displayName: userState?.displayName,
+          username: userState?.username,
+          localAuthSuccess
+        });
 
         onAuthCompleteRef.current({
           uid,
@@ -134,6 +198,11 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
         });
       },
       (err) => {
+        console.error("[TRACER] [Error] Device pairing subscription failed/ended with error:", {
+          code: err?.code,
+          message: err?.message,
+          stack: err?.stack
+        });
         setAuthError({
           message: "Pairing session lost. Please try generating a new code: " + err.message
         });
@@ -141,7 +210,10 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
       }
     );
 
-    return () => unsubscribe();
+    return () => {
+      console.log(`[TRACER] [useEffect] Cleaning up device pairing listener for code: "${pairingCode}"`);
+      unsubscribe();
+    };
   }, [step, pairingCode]);
 
   const [username, setUsername] = useState('');

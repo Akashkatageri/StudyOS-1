@@ -1210,20 +1210,46 @@ export function listenToDevicePairing(
   onError: (err: any) => void
 ): () => void {
   const docRef = doc(db, "device_links", code);
+  console.log(`[TRACER] [listenToDevicePairing] Subscribed to code: "${code}"`);
   return onSnapshot(docRef, (docSnap) => {
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      if (data && data.status === "paired" && data.uid) {
-        onPair(
-          data.uid, 
-          data.userState || null, 
-          data.encryptedIdToken || null, 
-          data.encryptedAccessToken || null
-        );
+    try {
+      console.log(`[TRACER] [onSnapshot] Fired for code: "${code}". Document exists: ${docSnap.exists()}`);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (!data) {
+          console.warn("[TRACER] [onSnapshot] Document exists but has NO data!");
+          return;
+        }
+        
+        const keys = Object.keys(data);
+        console.log("[TRACER] [onSnapshot] Document keys:", keys);
+        console.log("[TRACER] [onSnapshot] Field details:", {
+          status: data.status,
+          uid: data.uid,
+          hasEncryptedIdToken: !!data.encryptedIdToken,
+          hasEncryptedAccessToken: !!data.encryptedAccessToken,
+          hasUserState: !!data.userState
+        });
+
+        if (data.status === "paired" && data.uid) {
+          console.log("[TRACER] [onSnapshot] Status is 'paired' with valid uid. Invoking onPair callback...");
+          onPair(
+            data.uid, 
+            data.userState || null, 
+            data.encryptedIdToken || null, 
+            data.encryptedAccessToken || null
+          );
+        } else {
+          console.log(`[TRACER] [onSnapshot] Status or UID mismatch: status="${data.status}", uid="${data.uid}"`);
+        }
+      } else {
+        console.log(`[TRACER] [onSnapshot] Document does not exist for code: "${code}"`);
       }
+    } catch (err: any) {
+      console.error("[TRACER] [onSnapshot] Exception inside onSnapshot handler:", err);
     }
   }, (err) => {
-    console.error("Error listening to device link snapshot:", err);
+    console.error("[TRACER] [onSnapshot] Firestore listen error:", err);
     onError(err);
   });
 }
