@@ -16,10 +16,9 @@ import {
   Bookmark
 } from 'lucide-react';
 import { ModuleResource, UserState } from '../types';
-import { db } from '../lib/firebase';
+import { db, getDocs } from '../lib/firebase';
 import { 
   collection, 
-  getDocs, 
   doc, 
   setDoc, 
   deleteDoc, 

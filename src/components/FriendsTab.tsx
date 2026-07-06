@@ -49,9 +49,10 @@ import {
   createActivity,
   createNotification,
   db,
-  getProfileFromState
+  getProfileFromState,
+  getDoc
 } from '../lib/firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc } from 'firebase/firestore';
 import { signInWithPopup, signOut } from 'firebase/auth';
 import FriendProfileModal from './friends/FriendProfileModal';
 import FriendsPrivacyModal from './friends/FriendsPrivacyModal';

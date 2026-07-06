@@ -12,14 +12,14 @@ import {
   getFirestore, 
   doc, 
   setDoc, 
-  getDoc, 
-  getDocs, 
+  getDoc as originalGetDoc, 
+  getDocs as originalGetDocs, 
   updateDoc, 
   deleteDoc, 
   collection, 
   query, 
   where, 
-  onSnapshot,
+  onSnapshot as originalOnSnapshot,
   writeBatch,
   runTransaction,
   getDocFromServer
@@ -145,6 +145,119 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   throw new Error(JSON.stringify(errInfo));
+}
+
+export async function getDoc(ref: any): Promise<any> {
+  const path = ref.path || 'unknown';
+  const parts = path.split('/');
+  const collectionName = parts[0] || 'unknown';
+  const docId = parts.slice(1).join('/') || 'unknown';
+  try {
+    const snap = await originalGetDoc(ref);
+    const metadata = snap.metadata;
+    console.log(`[Firestore READ] getDoc SUCCESS
+- Collection: "${collectionName}"
+- Document: "${docId}"
+- Success: true
+- Failure: false
+- Firebase error code: null
+- Exception message: null
+- fromCache: ${metadata?.fromCache}
+- hasPendingWrites: ${metadata?.hasPendingWrites}`);
+    return snap;
+  } catch (err: any) {
+    const errorCode = err.code || 'unknown';
+    const message = err.message || String(err);
+    console.error(`[Firestore READ] getDoc FAILURE
+- Collection: "${collectionName}"
+- Document: "${docId}"
+- Success: false
+- Failure: true
+- Firebase error code: "${errorCode}"
+- Exception message: "${message}"`);
+    throw err;
+  }
+}
+
+export async function getDocs(q: any): Promise<any> {
+  let collectionName = 'unknown';
+  if (q.path) {
+    collectionName = q.path;
+  } else if (q._query && q._query.path) {
+    collectionName = q._query.path.toString();
+  } else if (q.query && q.query.path) {
+    collectionName = q.query.path.toString();
+  }
+  try {
+    const snap = await originalGetDocs(q);
+    const metadata = snap.metadata;
+    console.log(`[Firestore READ] getDocs SUCCESS
+- Collection: "${collectionName}"
+- Document: null (Collection Query)
+- Success: true
+- Failure: false
+- Firebase error code: null
+- Exception message: null
+- fromCache: ${metadata?.fromCache}
+- hasPendingWrites: ${metadata?.hasPendingWrites}`);
+    return snap;
+  } catch (err: any) {
+    const errorCode = err.code || 'unknown';
+    const message = err.message || String(err);
+    console.error(`[Firestore READ] getDocs FAILURE
+- Collection: "${collectionName}"
+- Document: null (Collection Query)
+- Success: false
+- Failure: true
+- Firebase error code: "${errorCode}"
+- Exception message: "${message}"`);
+    throw err;
+  }
+}
+
+export function onSnapshot(refOrQuery: any, onNext: any, onError?: any): () => void {
+  let path = 'unknown';
+  let isDoc = false;
+  if (refOrQuery.path) {
+    path = refOrQuery.path;
+    isDoc = true;
+  } else if (refOrQuery._query && refOrQuery._query.path) {
+    path = refOrQuery._query.path.toString();
+  } else if (refOrQuery.query && refOrQuery.query.path) {
+    path = refOrQuery.query.path.toString();
+  }
+
+  const collectionName = isDoc ? (path.split('/')[0] || 'unknown') : path;
+  const docId = isDoc ? (path.split('/').slice(1).join('/') || 'unknown') : null;
+
+  console.log(`[Firestore READ] onSnapshot listener registered for Collection: "${collectionName}"${docId ? `, Document: "${docId}"` : ''}`);
+
+  return originalOnSnapshot(refOrQuery, (snap: any) => {
+    const metadata = snap.metadata;
+    console.log(`[Firestore READ] onSnapshot SUCCESS
+- Collection: "${collectionName}"
+- Document: ${docId ? `"${docId}"` : 'null'}
+- Success: true
+- Failure: false
+- Firebase error code: null
+- Exception message: null
+- fromCache: ${metadata?.fromCache}
+- hasPendingWrites: ${metadata?.hasPendingWrites}`);
+    onNext(snap);
+  }, (err: any) => {
+    const errorCode = err.code || 'unknown';
+    const message = err.message || String(err);
+    console.error(`[Firestore READ] onSnapshot FAILURE
+- Collection: "${collectionName}"
+- Document: ${docId ? `"${docId}"` : 'null'}
+- Success: false
+- Failure: true
+- Firebase error code: "${errorCode}"
+- Exception message: "${message}"`);
+    if (onError) {
+      onError(err);
+    }
+  });
 }
 
 // Sync local user state to Cloud Firestore (Separate Collections: users, settings, studyStats)

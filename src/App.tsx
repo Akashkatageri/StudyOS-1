@@ -112,7 +112,36 @@ export default function App() {
     });
   };
   const [isLoading, setIsLoading] = useState(true);
-  const [authInitialized, setAuthInitialized] = useState(false);
+  const [authInitialized, setAuthInitializedInternal] = useState(false);
+  const setAuthInitialized = (val: boolean | ((prev: boolean) => boolean)) => {
+    const errorStack = new Error().stack || 'No stack trace available';
+    if (typeof val === 'function') {
+      setAuthInitializedInternal(prev => {
+        const next = (val as any)(prev);
+        console.log(`[StudyOS Trace] authInitialized transition: ${prev} -> ${next}`);
+        console.log(`[StudyOS Trace] authInitialized transition Stack Trace:\n${errorStack}`);
+        return next;
+      });
+    } else {
+      setAuthInitializedInternal(prev => {
+        console.log(`[StudyOS Trace] authInitialized transition: ${prev} -> ${val}`);
+        console.log(`[StudyOS Trace] authInitialized transition Stack Trace:\n${errorStack}`);
+        return val;
+      });
+    }
+  };
+
+  useEffect(() => {
+    console.log("[StudyOS Trace] App mounted");
+    const mountStack = new Error().stack || 'No stack trace available';
+    console.log(`[StudyOS Trace] App mounted Stack Trace:\n${mountStack}`);
+    return () => {
+      console.log("[StudyOS Trace] App unmounted");
+      const unmountStack = new Error().stack || 'No stack trace available';
+      console.log(`[StudyOS Trace] App unmounted Stack Trace:\n${unmountStack}`);
+    };
+  }, []);
+
   const isFirstLoad = useRef(true);
 
   // Keep a ref of userState to prevent stale closure bugs in persistent handlers like onAuthStateChanged
@@ -120,6 +149,11 @@ export default function App() {
   useEffect(() => {
     userStateRef.current = userState;
   }, [userState]);
+
+  const authInitializedRef = useRef(false);
+  useEffect(() => {
+    authInitializedRef.current = authInitialized;
+  }, [authInitialized]);
 
   const [isCloudSyncUnavailable, setIsCloudSyncUnavailableInternal] = useState(false);
   const setIsCloudSyncUnavailable = (val: boolean) => {
@@ -567,8 +601,9 @@ export default function App() {
   // Main synchronization and reconnect function
   const performSyncOnReconnect = async () => {
     console.log("[StudyOS Trace] performSyncOnReconnect started");
+    console.log(`[StudyOS Trace] [performSyncOnReconnect Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
 
-    if (!authInitialized) {
+    if (!authInitializedRef.current) {
       console.log("[StudyOS Trace] performSyncOnReconnect skipped because auth not initialized");
       return;
     }
@@ -790,6 +825,7 @@ export default function App() {
           // Listen for App Resume (coming from background)
           appListener = await CapApp.addListener('appStateChange', async (state) => {
             console.log(`[StudyOS Trace] [Capacitor App] appStateChange fired. isActive=${state.isActive}`);
+            console.log(`[StudyOS Trace] [Capacitor App Listener Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
             if (state.isActive && isMountedRef.current) {
               console.log("[StudyOS Trace] [Capacitor App] App resumed. Triggering network and sync check...");
               await performSyncOnReconnect();
@@ -799,6 +835,7 @@ export default function App() {
           // Listen for Network changes
           netListener = await Network.addListener('networkStatusChange', async (status) => {
             console.log(`[StudyOS Trace] [Capacitor Network] networkStatusChange fired. connected=${status.connected}, connectionType=${status.connectionType}`);
+            console.log(`[StudyOS Trace] [Capacitor Network Listener Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
             if (isMountedRef.current) {
               await handleNetworkChange(status.connected);
             }
@@ -819,16 +856,19 @@ export default function App() {
         // Browser Fallback listeners
         const handleOnline = () => {
           console.log("[StudyOS Trace] [Browser Network] online event fired.");
+          console.log(`[StudyOS Trace] [Browser Online Listener Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
           if (isMountedRef.current) performSyncOnReconnect();
         };
 
         const handleOffline = () => {
           console.log("[StudyOS Trace] [Browser Network] offline event fired.");
+          console.log(`[StudyOS Trace] [Browser Offline Listener Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
           if (isMountedRef.current) handleNetworkChange(false);
         };
 
         const handleVisibility = () => {
           console.log(`[StudyOS Trace] [Browser Lifecycle] visibilitychange fired. state=${document.visibilityState}`);
+          console.log(`[StudyOS Trace] [Browser Visibility Listener Context] authInitialized (closed state)=${authInitialized}, authInitializedRef (live ref)=${authInitializedRef.current}, auth.currentUser UID=${auth.currentUser?.uid || 'null'}, userStateRef UID=${userStateRef.current?.uid || 'null'}`);
           if (document.visibilityState === 'visible' && isMountedRef.current) {
             performSyncOnReconnect();
           }

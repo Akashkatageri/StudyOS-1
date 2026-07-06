@@ -19,9 +19,9 @@ import {
   ArrowLeft,
   HardDrive
 } from 'lucide-react';
-import { auth, googleProvider, isUsernameUnique, loadUserFromFirestore, db, createDevicePairingCode, listenToDevicePairing } from '../lib/firebase';
+import { auth, googleProvider, isUsernameUnique, loadUserFromFirestore, db, createDevicePairingCode, listenToDevicePairing, onSnapshot } from '../lib/firebase';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-import { doc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { UserState } from '../types';
 
 interface AuthScreenProps {
