@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { auth, googleProvider, isUsernameUnique, loadUserFromFirestore, db, createDevicePairingCode, listenToDevicePairing, onSnapshot, inspectIndexedDB, inspectLocalStorage } from '../lib/firebase';
 import { signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, signInWithCredential } from 'firebase/auth';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import { doc, setDoc, deleteDoc, getDoc, enableNetwork } from 'firebase/firestore';
 import { UserState } from '../types';
 import { decryptData } from '../lib/crypto';
 
@@ -214,6 +214,151 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
     return () => {
       console.log(`[TRACER] [useEffect] Cleaning up device pairing listener for code: "${pairingCode}"`);
       unsubscribe();
+    };
+  }, [step, pairingCode]);
+
+  const handleResumeOrFocus = async () => {
+    if (step !== 'pairing' || !pairingCode) {
+      console.log(`[TRACER] [Focus/Resume] handleResumeOrFocus skipped because step is "${step}" and pairingCode is "${pairingCode}"`);
+      return;
+    }
+    
+    console.log(`[TRACER] [Focus/Resume] App focus/resume/check triggered. Verifying device pairing status for code: "${pairingCode}"...`);
+    try {
+      // Enable Firestore network first to recover from background sleep
+      try {
+        await enableNetwork(db);
+        console.log("[TRACER] [Focus/Resume] Firestore network enabled successfully.");
+      } catch (e) {
+        console.warn("[TRACER] [Focus/Resume] enableNetwork failed:", e);
+      }
+
+      const docRef = doc(db, "device_links", pairingCode);
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        console.log("[TRACER] [Focus/Resume] Manual getDoc data:", data);
+        if (data && data.status === "paired" && data.uid) {
+          console.log("[TRACER] [Focus/Resume] Pairing document is PAIRED. Processing authentication...");
+
+          const pairingKey = localStorage.getItem('pairing_key');
+
+          if (data.encryptedIdToken && pairingKey) {
+            try {
+              console.log("[TRACER] [Focus/Resume] Decrypting tokens...");
+              const idToken = decryptData(data.encryptedIdToken, pairingKey);
+              const accessToken = data.encryptedAccessToken ? decryptData(data.encryptedAccessToken, pairingKey) : null;
+
+              if (idToken) {
+                console.log("[TRACER] [Focus/Resume] Calling signInWithCredential...");
+                const credential = GoogleAuthProvider.credential(idToken, accessToken || undefined);
+                const result = await signInWithCredential(auth, credential);
+                console.log("[TRACER] [Focus/Resume] signInWithCredential resolved successfully! UID:", result.user.uid);
+              }
+            } catch (authErr) {
+              console.error("[TRACER] [Focus/Resume] Local Firebase auth failed:", authErr);
+            }
+          } else {
+            console.warn("[TRACER] [Focus/Resume] Missing tokens or pairing key in localStorage. Key exists:", !!pairingKey);
+          }
+
+          // Clean up pairing key
+          localStorage.removeItem('pairing_key');
+
+          // Delete the pairing document immediately for security
+          try {
+            console.log("[TRACER] [Focus/Resume] Deleting pairing document...");
+            await deleteDoc(docRef);
+            console.log("[TRACER] [Focus/Resume] Pairing document deleted successfully.");
+          } catch (delErr) {
+            console.warn("[TRACER] [Focus/Resume] Failed to delete pairing document:", delErr);
+          }
+
+          console.log("[TRACER] [Focus/Resume] Completing auth in parent component...");
+          onAuthCompleteRef.current({
+            uid: data.uid,
+            email: data.userState?.email,
+            displayName: data.userState?.displayName,
+            isOffline: false,
+            username: data.userState?.username,
+            onboarded: data.userState?.onboarded || false,
+            fullState: data.userState || undefined
+          });
+
+          if (!data.userState || !data.userState.onboarded || !data.userState.username) {
+            console.log("[TRACER] [Focus/Resume] User is not onboarded or missing username. Transitioning step from 'pairing' to 'username'...");
+            setAuthData({
+              uid: data.uid,
+              email: data.userState?.email || undefined,
+              displayName: data.userState?.displayName || undefined
+            });
+            const base = (data.userState?.displayName || data.userState?.email || "user")
+              .toLowerCase()
+              .replace(/[^a-z0-9_]/g, '');
+            setUsername(base.slice(0, 15));
+            setStep('username');
+          }
+        } else {
+          console.log(`[TRACER] [Focus/Resume] Pairing document is still pending pairing (status: "${data?.status || 'unknown'}", uid: "${data?.uid || 'none'}").`);
+        }
+      } else {
+        console.log(`[TRACER] [Focus/Resume] Pairing document does not exist for code: "${pairingCode}"`);
+      }
+    } catch (err) {
+      console.error("[TRACER] [Focus/Resume] Exception in focus/resume pairing check:", err);
+    }
+  };
+
+  // Listen for App Resume, window focus, or visibility changes to trigger immediate checks
+  useEffect(() => {
+    if (step !== 'pairing' || !pairingCode) return;
+
+    let appListener: any = null;
+
+    const onAppActive = async () => {
+      await handleResumeOrFocus();
+    };
+
+    // 1. Capacitor native App resume listener
+    const setupNativeListener = async () => {
+      try {
+        const { App: CapApp } = await import('@capacitor/app');
+        appListener = await CapApp.addListener('appStateChange', async (state) => {
+          console.log(`[TRACER] [Focus/Resume] Capacitor App state changed. isActive=${state.isActive}`);
+          if (state.isActive) {
+            await onAppActive();
+          }
+        });
+      } catch (err) {
+        console.log("[TRACER] [Focus/Resume] Capacitor App plugin not available natively. Standard browser focus/visibility listeners will be used instead.");
+      }
+    };
+    setupNativeListener();
+
+    // 2. Browser standard focus & visibilitychange listeners
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        onAppActive();
+      }
+    };
+
+    const handleWindowFocus = () => {
+      onAppActive();
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+
+    // Run an initial check immediately on mount/activation
+    onAppActive();
+
+    return () => {
+      if (appListener) {
+        appListener.remove();
+      }
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, [step, pairingCode]);
 
@@ -1189,9 +1334,20 @@ export default function AuthScreen({ initialUser, onAuthComplete }: AuthScreenPr
                       </button>
                     </div>
 
-                    <div className="flex items-center justify-center gap-2 text-[11px] text-gray-500 pt-1">
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
-                      <span>Waiting for Google Account response...</span>
+                    <div className="flex flex-col items-center justify-center gap-2 pt-2 border-t border-gray-900">
+                      <div className="flex items-center justify-center gap-2 text-[11px] text-gray-500">
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                        <span>Waiting for Google Account response...</span>
+                      </div>
+                      
+                      <button
+                        type="button"
+                        onClick={handleResumeOrFocus}
+                        className="mt-1 px-4 py-2 bg-emerald-600/10 border border-emerald-500/20 hover:bg-emerald-600/20 hover:border-emerald-500/30 text-emerald-400 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 shadow-sm shadow-emerald-500/5 active:scale-95"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>I completed Sign-In, Check Now</span>
+                      </button>
                     </div>
                   </>
                 ) : (
