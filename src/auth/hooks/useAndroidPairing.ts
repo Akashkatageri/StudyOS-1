@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
-import { enableNetwork } from 'firebase/firestore';
 import { signInWithCredential, GoogleAuthProvider } from 'firebase/auth';
-import { db, auth, listenToDevicePairing, inspectLocalStorage, inspectIndexedDB } from '../../lib/firebase';
+import { auth, listenToDevicePairing, inspectLocalStorage, inspectIndexedDB } from '../../lib/firebase';
 import { decryptData } from '../../lib/crypto';
 import { fetchPairingStatusRest, fetchPairingStatusSDK, deletePairingDoc } from '../services/pairingService';
 
@@ -135,14 +134,6 @@ export function useAndroidPairing({
 
     console.log(`[TRACER] [Focus/Resume] App focus/resume/check triggered. Verifying device pairing status for code: "${pairingCode}"...`);
     try {
-      // Enable Firestore network first to recover from background sleep
-      try {
-        await enableNetwork(db);
-        console.log("[TRACER] [Focus/Resume] Firestore network enabled successfully.");
-      } catch (e) {
-        console.warn("[TRACER] [Focus/Resume] enableNetwork failed:", e);
-      }
-
       let data = await fetchPairingStatusRest(pairingCode);
 
       // Fallback to standard Firestore SDK getDoc if REST fetch failed/returned empty

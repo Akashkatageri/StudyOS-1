@@ -19,10 +19,9 @@ import TopicViewModal from './components/TopicViewModal';
 import CompletionAnimations from './components/CompletionAnimations';
 import BadgeUnlockModal from './components/BadgeUnlockModal';
 import { getUnlockedAchievementIds, ACHIEVEMENT_DEFS } from './utils/achievements';
-import { auth, db, googleProvider, syncUserToFirestore, triggerSocialMilestone, loadUserFromFirestore, registerUserProfileTransaction, subscribeFriendRequests, subscribeNotifications, linkDeviceWithAccount, mergeLocalAndCloudStates } from './lib/firebase';
+import { auth, googleProvider, syncUserToFirestore, triggerSocialMilestone, loadUserFromFirestore, registerUserProfileTransaction, subscribeFriendRequests, subscribeNotifications, linkDeviceWithAccount, mergeLocalAndCloudStates } from './lib/firebase';
 import { onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onIdTokenChanged } from 'firebase/auth';
 import { encryptData } from './lib/crypto';
-import { enableNetwork } from 'firebase/firestore';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { Network } from '@capacitor/network';
@@ -234,6 +233,8 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; title: string; type: 'success' | 'warning' | 'info' | 'error' } | null>(null);
   const [hasPendingRequests, setHasPendingRequests] = useState(false);
   const [hasUnreadNotifs, setHasUnreadNotifs] = useState(false);
+  const [receivedRequests, setReceivedRequests] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
 
   // Device Pairing State (Option A)
   const [pendingPairCode, setPendingPairCode] = useState<string | null>(null);
@@ -560,17 +561,6 @@ export default function App() {
         let cloudData = null;
         let dbErrorHappened = false;
 
-        // Enable Firestore network if physically connected before load
-        if (isPhysicallyConnected) {
-          try {
-            console.log("[StudyOS Trace] Calling enableNetwork(db) prior to loading user profile...");
-            await enableNetwork(db);
-            console.log("[StudyOS Trace] Firestore network enabled (pre-load)");
-          } catch (dbErr) {
-            console.warn("[StudyOS Trace] pre-load enableNetwork(db) failed:", dbErr);
-          }
-        }
-
         try {
           cloudData = await loadUserFromFirestore(user.uid);
         } catch (dbErr) {
@@ -799,15 +789,6 @@ export default function App() {
       console.log("⚡ [StudyOS Trace] Reconnection/Resume active. Running cloud recovery...");
 
       try {
-        // 1. Force enable Firestore network & trigger retries of pending writes/listens
-        try {
-          console.log("[StudyOS Trace] Calling enableNetwork(db) to explicitly connect Firestore...");
-          await enableNetwork(db);
-          console.log("[StudyOS Trace] Firestore network enabled");
-        } catch (dbErr: any) {
-          console.warn(`[StudyOS Trace] enableNetwork(db) FAILED: ${dbErr?.message || dbErr}`);
-        }
-
         // 2. Refresh Firebase Auth if needed (forces reconnection & updates auth token)
         if (auth.currentUser) {
           try {
@@ -845,11 +826,13 @@ export default function App() {
           console.log("[StudyOS Trace] performSyncOnReconnect: Triggering silent cloud sync write...");
           await syncUserToFirestore(currentState.uid, updatedState);
 
-          setToast({
-            title: "📶 Back Online",
-            message: "Your internet connection is restored! Your progress has been successfully merged and synchronized with the cloud.",
-            type: "success"
-          });
+          if (currentState?.isOffline) {
+            setToast({
+              title: "📶 Back Online",
+              message: "Your internet connection is restored! Your progress has been successfully merged and synchronized with the cloud.",
+              type: "success"
+            });
+          }
         } else {
           console.log("[StudyOS Trace] performSyncOnReconnect: No cloud profile found, but online. Setting isOffline=false.");
           if (currentState.isOffline) {
@@ -1123,17 +1106,19 @@ export default function App() {
 
   // 1d. Subscribe to notification status globally to control the notification bell active dot
   useEffect(() => {
-    if (!userState || !userState.uid) {
+    if (!userState || !userState.uid || !userState.onboarded) {
       setHasPendingRequests(false);
       setHasUnreadNotifs(false);
+      setReceivedRequests([]);
+      setNotifications([]);
       
       if (unsubRequestsRef.current) {
-        console.log("[StudyOS Trace] [App Subscriptions] Cleaning up unsubRequestsRef because user logged out...");
+        console.log("[StudyOS Trace] [App Subscriptions] Cleaning up unsubRequestsRef because user logged out or is not onboarded...");
         unsubRequestsRef.current();
         unsubRequestsRef.current = null;
       }
       if (unsubNotificationsRef.current) {
-        console.log("[StudyOS Trace] [App Subscriptions] Cleaning up unsubNotificationsRef because user logged out...");
+        console.log("[StudyOS Trace] [App Subscriptions] Cleaning up unsubNotificationsRef because user logged out or is not onboarded...");
         unsubNotificationsRef.current();
         unsubNotificationsRef.current = null;
       }
@@ -1149,6 +1134,7 @@ export default function App() {
       unsubRequestsRef.current = null;
     }
     unsubRequestsRef.current = subscribeFriendRequests(userState.uid, (requests) => {
+      setReceivedRequests(requests);
       setHasPendingRequests(requests.length > 0);
     });
 
@@ -1159,6 +1145,7 @@ export default function App() {
       unsubNotificationsRef.current = null;
     }
     unsubNotificationsRef.current = subscribeNotifications(userState.uid, (notifs) => {
+      setNotifications(notifs);
       setHasUnreadNotifs(notifs.some(n => !n.read));
     });
 
@@ -1173,7 +1160,7 @@ export default function App() {
         unsubNotificationsRef.current = null;
       }
     };
-  }, [userState?.uid]);
+  }, [userState?.uid, userState?.onboarded]);
 
   // Trigger Streak Danger Modal Pop-up once per browser session
   useEffect(() => {
@@ -2002,6 +1989,8 @@ export default function App() {
             userState={userState}
             onUpdateState={handleUpdateState}
             onTriggerToast={(title, message, type) => setToast({ title, message, type })}
+            receivedRequests={receivedRequests}
+            notifications={notifications}
           />
         )}
 

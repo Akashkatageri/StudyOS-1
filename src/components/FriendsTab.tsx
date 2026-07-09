@@ -47,9 +47,17 @@ interface FriendsTabProps {
   userState: UserState;
   onUpdateState: (updated: Partial<UserState>) => void;
   onTriggerToast: (title: string, message: string, type: 'success' | 'warning' | 'info') => void;
+  receivedRequests?: FriendRequest[];
+  notifications?: SocialNotification[];
 }
 
-export default function FriendsTab({ userState, onUpdateState, onTriggerToast }: FriendsTabProps) {
+export default function FriendsTab({ 
+  userState, 
+  onUpdateState, 
+  onTriggerToast,
+  receivedRequests: propReceivedRequests,
+  notifications: propNotifications
+}: FriendsTabProps) {
   const [activeSubTab, setActiveSubTab] = useState<'friends' | 'requests' | 'search' | 'leaderboard'>('friends');
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<FriendProfile[]>([]);
@@ -57,10 +65,15 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
   const [friendsList, setFriendsList] = useState<FriendProfile[]>([]);
   
   // Real-time Firestore subscriptions
-  const [receivedRequests, setReceivedRequests] = useState<FriendRequest[]>([]);
+  const [localReceivedRequests, setLocalReceivedRequests] = useState<FriendRequest[]>([]);
   const [sentRequests, setSentRequests] = useState<FriendRequest[]>([]);
-  const [notifications, setNotifications] = useState<SocialNotification[]>([]);
+  const [localNotifications, setLocalNotifications] = useState<SocialNotification[]>([]);
   const [friendsActivities, setFriendsActivities] = useState<SocialActivity[]>([]);
+  
+  const receivedRequests = propReceivedRequests ?? localReceivedRequests;
+  const notifications = propNotifications ?? localNotifications;
+  
+  const setReceivedRequests = setLocalReceivedRequests;
   
   // Modals & detail views
   const [selectedProfile, setSelectedProfile] = useState<FriendProfile | null>(null);
@@ -130,9 +143,9 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
   // Setup live snapshot listeners on user login status change
   useEffect(() => {
     if (!userState.uid) {
-      setReceivedRequests([]);
+      setLocalReceivedRequests([]);
       setSentRequests([]);
-      setNotifications([]);
+      setLocalNotifications([]);
 
       if (unsubReceivedRef.current) {
         unsubReceivedRef.current();
@@ -151,15 +164,17 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
 
     console.log(`[StudyOS Trace] [FriendsTab Subscriptions] Setting up listeners for UID: ${userState.uid}`);
 
-    // Subscribe to incoming friend requests
-    if (unsubReceivedRef.current) {
-      console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubReceivedRef already exists, cleaning up first...");
-      unsubReceivedRef.current();
-      unsubReceivedRef.current = null;
+    // Subscribe to incoming friend requests ONLY if not provided by root/parent
+    if (!propReceivedRequests) {
+      if (unsubReceivedRef.current) {
+        console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubReceivedRef already exists, cleaning up first...");
+        unsubReceivedRef.current();
+        unsubReceivedRef.current = null;
+      }
+      unsubReceivedRef.current = subscribeFriendRequests(userState.uid, (requests) => {
+        setLocalReceivedRequests(requests);
+      });
     }
-    unsubReceivedRef.current = subscribeFriendRequests(userState.uid, (requests) => {
-      setReceivedRequests(requests);
-    });
 
     // Subscribe to outgoing friend requests
     if (unsubSentRef.current) {
@@ -171,15 +186,17 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
       setSentRequests(requests);
     });
 
-    // Subscribe to system notifications
-    if (unsubNotificationsRef.current) {
-      console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubNotificationsRef already exists, cleaning up first...");
-      unsubNotificationsRef.current();
-      unsubNotificationsRef.current = null;
+    // Subscribe to system notifications ONLY if not provided by root/parent
+    if (!propNotifications) {
+      if (unsubNotificationsRef.current) {
+        console.log("[StudyOS Trace] [FriendsTab Subscriptions] unsubNotificationsRef already exists, cleaning up first...");
+        unsubNotificationsRef.current();
+        unsubNotificationsRef.current = null;
+      }
+      unsubNotificationsRef.current = subscribeNotifications(userState.uid, (notifs) => {
+        setLocalNotifications(notifs);
+      });
     }
-    unsubNotificationsRef.current = subscribeNotifications(userState.uid, (notifs) => {
-      setNotifications(notifs);
-    });
 
     return () => {
       console.log("[StudyOS Trace] [FriendsTab Subscriptions] Cleaning up listeners...");
@@ -196,7 +213,7 @@ export default function FriendsTab({ userState, onUpdateState, onTriggerToast }:
         unsubNotificationsRef.current = null;
       }
     };
-  }, [userState.uid]);
+  }, [userState.uid, propReceivedRequests, propNotifications]);
 
   // Setup app resume/reconnection listener to force refresh
   useEffect(() => {
