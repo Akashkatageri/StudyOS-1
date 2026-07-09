@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Loader2, CheckCircle2, AlertCircle } from 'lucide-react';
-import { signInWithRedirect, getRedirectResult, signInWithPopup, signOut, GoogleAuthProvider } from 'firebase/auth';
+import { signInWithRedirect, getRedirectResult, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth, googleProvider, db } from '../lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import AppLogo from './AppLogo';
@@ -148,11 +148,11 @@ export default function AuthPopupScreen() {
           return;
         }
 
-        // 2. Clear any stale session in the popup domain if we don't have a redirect result
+        // 2. Check if auth.currentUser is set (e.g. from redirect completed but state tracking missed)
         if (auth.currentUser && active) {
-          console.log("[StudyOS Trace] [AuthPopupScreen] Signing out stale session to allow clean account selection. Current User UID:", auth.currentUser.uid);
-          await signOut(auth);
-          console.log("[StudyOS Trace] [AuthPopupScreen] Stale session signOut(auth) complete.");
+          console.log("[StudyOS Trace] [AuthPopupScreen] auth.currentUser is populated on mount. Using active session.");
+          await handleAuthSuccess(auth.currentUser);
+          return;
         }
 
         // 3. Set status to idle to let the user sign in with popup
@@ -162,6 +162,13 @@ export default function AuthPopupScreen() {
       } catch (err: any) {
         console.error("Popup Authentication Error:", err);
         if (active) {
+          // If we have an active user session despite the error, use it!
+          if (auth.currentUser) {
+            console.log("[StudyOS Trace] [AuthPopupScreen] Error during redirect result but auth.currentUser exists. Falling back to active session.");
+            await handleAuthSuccess(auth.currentUser);
+            return;
+          }
+
           const msg = err.message || String(err);
           const errCode = err.code || "";
           const isBenign = 
@@ -193,8 +200,8 @@ export default function AuthPopupScreen() {
       
       <div className="w-full max-w-sm bg-[#141A1F] rounded-3xl border border-gray-800 p-8 space-y-6 shadow-2xl relative z-10">
         {/* Brand */}
-        <div className="mx-auto w-16 h-16 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 border border-blue-400/20">
-          <AppLogo className="w-full h-full" />
+        <div className="mx-auto w-16 h-16 rounded-2xl overflow-hidden shadow-[0_0_20px_rgba(59,130,246,0.3)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 border border-blue-400/20 p-2">
+          <AppLogo className="w-full h-full" transparent={true} />
         </div>
 
         {status === 'idle' && (
