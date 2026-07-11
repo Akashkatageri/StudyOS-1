@@ -9,6 +9,7 @@ import AuthScreen from './components/AuthScreen';
 import Onboarding from './components/Onboarding';
 import AuthPopupScreen from './components/AuthPopupScreen';
 import Header from './components/Header';
+import AppLogo from './components/AppLogo';
 import HomeTab from './components/HomeTab';
 import ProgressionTab from './components/ProgressionTab';
 import ProgressTab from './components/ProgressTab';
@@ -20,7 +21,7 @@ import CompletionAnimations from './components/CompletionAnimations';
 import BadgeUnlockModal from './components/BadgeUnlockModal';
 import { getUnlockedAchievementIds, ACHIEVEMENT_DEFS } from './utils/achievements';
 import { auth, googleProvider, syncUserToFirestore, triggerSocialMilestone, loadUserFromFirestore, registerUserProfileTransaction, subscribeFriendRequests, subscribeNotifications, linkDeviceWithAccount, mergeLocalAndCloudStates } from './lib/firebase';
-import { onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onIdTokenChanged } from 'firebase/auth';
+import { onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onIdTokenChanged, getRedirectResult } from 'firebase/auth';
 import { encryptData } from './lib/crypto';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -242,6 +243,41 @@ export default function App() {
   const [isPairingLoading, setIsPairingLoading] = useState(false);
   const [pairingSuccess, setPairingSuccess] = useState(false);
 
+  const [googleIdToken, setGoogleIdToken] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      return sessionStorage.getItem('google_id_token') || null;
+    }
+    return null;
+  });
+
+  // Process redirect results from Google Sign-In at the top level to capture credentials
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const checkRedirectResult = async () => {
+      try {
+        console.log("[PAIRING] Top-level checking for Google Redirect Result...");
+        const result = await getRedirectResult(auth);
+        if (result) {
+          console.log("[PAIRING] Top-level retrieved Google Redirect Result successfully!");
+          const credential = GoogleAuthProvider.credentialFromResult(result);
+          if (credential) {
+            console.log("[PAIRING] Top-level storing Google credentials in sessionStorage...");
+            if (credential.idToken) {
+              sessionStorage.setItem('google_id_token', credential.idToken);
+              setGoogleIdToken(credential.idToken);
+            }
+            if (credential.accessToken) {
+              sessionStorage.setItem('google_access_token', credential.accessToken);
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("[PAIRING] Error checking Google Redirect Result at top level:", err);
+      }
+    };
+    checkRedirectResult();
+  }, []);
+
   // Read pair_code from URL parameters on initialization
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -270,11 +306,11 @@ export default function App() {
     if (userState && userState.uid && !pairingSuccess && !isPairingLoading) {
       const savedCode = localStorage.getItem('pending_pair_code') || pendingPairCode;
       if (savedCode) {
-        const idToken = sessionStorage.getItem('google_id_token');
+        const idToken = googleIdToken || sessionStorage.getItem('google_id_token');
         if (!idToken) {
           // If we don't have the Google ID token in this browser session yet, 
           // do NOT silently pair (which would write empty credentials). Let them click the Confirm Pairing modal button instead.
-          console.log("[PAIRING] Delaying automatic silent pairing: Google ID token not yet in sessionStorage.");
+          console.log("[PAIRING] Delaying automatic silent pairing: Google ID token not yet in sessionStorage or state.");
           return;
         }
 
@@ -325,17 +361,17 @@ export default function App() {
         autoSilentPair();
       }
     }
-  }, [userState, pendingPairCode, pairingSuccess, isPairingLoading]);
+  }, [userState, pendingPairCode, pairingSuccess, isPairingLoading, googleIdToken]);
 
   // Auto-redirect back to native app when successfully paired in browser
   useEffect(() => {
-    if (pendingPairCode && userState && userState.uid) {
+    if (pendingPairCode && userState && userState.uid && pairingSuccess) {
       const redirectTimer = setTimeout(() => {
         window.location.href = "com.studyos.app://";
       }, 1500);
       return () => clearTimeout(redirectTimer);
     }
-  }, [pendingPairCode, userState]);
+  }, [pendingPairCode, userState, pairingSuccess]);
 
   // Semester manual transition states
   const [isSemTransitionOpen, setIsSemTransitionOpen] = useState(false);
@@ -1368,45 +1404,86 @@ export default function App() {
 
   // If we are currently completing an automatic silent device pairing from Google Login
   if (pendingPairCode && userState && userState.uid) {
+    const hasIdToken = !!(googleIdToken || sessionStorage.getItem('google_id_token'));
+
     return (
       <div className="min-h-screen bg-[#060809] flex flex-col items-center justify-center p-6 text-center">
         <div className="max-w-md w-full bg-[#0D1115] border border-gray-800 rounded-2xl p-8 space-y-6 shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-1/2 -translate-x-1/2 w-48 h-48 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
           
-          <div className="mx-auto w-16 h-16 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
-            <Check className="w-8 h-8 animate-bounce" />
+          {/* App Brand Icon */}
+          <div className="mx-auto w-20 h-20 rounded-3xl overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.2)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 border border-blue-400/20 p-2.5">
+            <AppLogo className="w-full h-full" transparent={true} />
           </div>
 
           <div className="space-y-2">
-            <h3 className="text-2xl font-bold text-white tracking-tight font-display">Google Sign-In Successful!</h3>
+            <h3 className="text-2xl font-bold text-white tracking-tight font-display">
+              {hasIdToken ? "Google Sign-In Successful!" : "Link Your Device"}
+            </h3>
             <p className="text-sm text-gray-400 leading-relaxed">
-              You have successfully signed in with your Google Account <span className="text-blue-400 font-mono">({userState.email})</span>.
+              {hasIdToken ? (
+                <>
+                  You have successfully signed in with your Google Account <span className="text-blue-400 font-mono">({userState.email})</span>.
+                </>
+              ) : (
+                <>
+                  Connect your mobile device to your StudyOS profile <span className="text-blue-400 font-mono">({userState.email})</span>.
+                </>
+              )}
             </p>
           </div>
 
-          <div className="p-4 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-3">
-            <p className="text-xs text-blue-300 font-medium">
-              We have completed the secure connection on your mobile device.
-            </p>
-            <div className="flex items-center justify-center gap-2 text-xs text-gray-500">
-              <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
-              <span>Syncing login state...</span>
+          {hasIdToken ? (
+            <div className="p-4 bg-emerald-950/20 border border-emerald-900/30 rounded-xl space-y-3">
+              <p className="text-xs text-emerald-300 font-medium font-sans">
+                We are completing the secure connection on your mobile device.
+              </p>
+              <div className="flex items-center justify-center gap-2 text-xs text-gray-500 font-mono">
+                <Loader2 className="w-4 h-4 animate-spin text-emerald-400" />
+                <span>Syncing login state...</span>
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="p-5 bg-blue-950/20 border border-blue-900/30 rounded-xl space-y-4">
+              <p className="text-xs text-blue-300 font-medium leading-relaxed font-sans">
+                A secure browser authentication token is required to link your mobile device. Please click the button below to authorize and complete the connection.
+              </p>
+              <button
+                type="button"
+                disabled={isPairingLoading}
+                onClick={handleConfirmPairing}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-lg shadow-blue-600/20 transition-all cursor-pointer flex items-center justify-center gap-1.5 animate-pulse"
+              >
+                {isPairingLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Redirecting to Google...</span>
+                  </>
+                ) : (
+                  <>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Authorize & Sync Device</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
 
-          <div className="pt-2 space-y-4">
-            <a
-              href="com.studyos.app://"
-              className="w-full py-3 bg-blue-600 hover:bg-blue-500 active:scale-98 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-blue-600/20"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Open StudyOS App</span>
-            </a>
+          {hasIdToken && (
+            <div className="pt-2 space-y-4">
+              <a
+                href="com.studyos.app://"
+                className="w-full py-3 bg-blue-600 hover:bg-blue-500 active:scale-98 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-blue-600/20"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Open StudyOS App</span>
+              </a>
 
-            <p className="text-[11px] text-gray-500 leading-relaxed">
-              If the app doesn't open automatically, click the button above or manually return to the StudyOS app on your phone.
-            </p>
-          </div>
+              <p className="text-[11px] text-gray-500 leading-relaxed font-sans">
+                If the app doesn't open automatically, click the button above or manually return to the StudyOS app on your phone.
+              </p>
+            </div>
+          )}
         </div>
       </div>
     );
