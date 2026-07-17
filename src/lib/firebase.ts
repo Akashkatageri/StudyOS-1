@@ -6,7 +6,8 @@ import {
   onIdTokenChanged
 } from "firebase/auth";
 import { 
-  getFirestore, 
+  initializeFirestore,
+  memoryLocalCache,
   doc, 
   setDoc, 
   getDoc as originalGetDoc, 
@@ -196,7 +197,9 @@ if (typeof (auth as any).beforeAuthStateChanged === 'function') {
 // Initialize Firestore with the named database where all the collections reside.
 // This ensures that downloaded code running on localhost still connects to the correct database.
 console.log("[StudyOS Trace] Firestore module loading and initializing db with name 'ai-studio-studyos-dab98d62-f9f3-4125-906a-d48f2df82335'...");
-export const db = getFirestore(app, "ai-studio-studyos-dab98d62-f9f3-4125-906a-d48f2df82335");
+export const db = initializeFirestore(app, {
+  localCache: memoryLocalCache()
+}, "ai-studio-studyos-dab98d62-f9f3-4125-906a-d48f2df82335");
 console.log("[StudyOS Trace] Firestore DB object created successfully.");
 
 // -------------------------------------------------------------------

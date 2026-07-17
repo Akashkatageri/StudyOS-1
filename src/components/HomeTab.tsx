@@ -4,6 +4,7 @@ import { findTopicById } from '../data';
 import { SoundManager } from '../utils/soundManager';
 import { getLocalDateString } from '../utils/dateUtils';
 import { getTopicEstimatedTime } from '../utils/xpUtils';
+import { getDailyReviewQueue } from '../lib/spacedRepetition';
 import { 
   Play, 
   Flame, 
@@ -16,7 +17,8 @@ import {
   CheckCircle2, 
   BookOpen,
   Bell,
-  Users
+  Users,
+  Brain
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import AndroidWidgetSimulator from './AndroidWidgetSimulator';
@@ -33,6 +35,7 @@ interface HomeTabProps {
   onOpenStudyCalendar?: () => void;
   onTriggerSemesterTransition?: () => void;
   onUpdateState: (updated: Partial<UserState>) => void;
+  onStartReviewSession?: () => void;
   hasActiveNotifications?: boolean;
 }
 
@@ -43,9 +46,14 @@ export default function HomeTab({
   onStartTopic,
   onOpenFocusTimer,
   onUpdateState,
+  onStartReviewSession,
   hasActiveNotifications = false,
 }: HomeTabProps) {
   const { completedTopics = [] } = userState;
+
+  // Spaced Repetition Due Count
+  const dueReviews = getDailyReviewQueue(userState.revisions || []);
+  const dueCount = dueReviews.length;
 
   // Search & Browse Subjects state
   const [isBrowseOpen, setIsBrowseOpen] = useState(false);
@@ -397,6 +405,44 @@ export default function HomeTab({
           <span className="text-[9px] font-bold text-gray-500 mt-1 uppercase tracking-wider font-mono">Total XP</span>
         </div>
       </div>
+
+      {/* ==========================================
+          SPACED REPETITION - TODAY'S REVIEWS CARD
+          ========================================== */}
+      {dueCount > 0 && onStartReviewSession && (
+        <div className="bg-gradient-to-br from-[#1A102F] via-[#351052] to-[#7B1393] border border-[#7B1393]/30 rounded-[32px] p-5.5 shadow-[0_20px_50px_rgba(123,19,147,0.25)] relative overflow-hidden flex items-center justify-between gap-4 animate-fade-in mb-6" id="spaced-repetition-reviews-card">
+          <div className="absolute top-[-10%] right-[-10%] w-48 h-48 bg-white/5 rounded-full filter blur-xl pointer-events-none" />
+          <div className="absolute bottom-[-10%] left-[-10%] w-32 h-32 bg-[#7C5CFF]/10 rounded-full filter blur-xl pointer-events-none" />
+
+          <div className="space-y-4 flex-1">
+            <div className="space-y-1">
+              <span className="text-[8px] font-black text-[#E892FF] uppercase tracking-widest font-mono flex items-center gap-1">
+                <Brain className="w-3.5 h-3.5 text-[#E892FF]" />
+                <span>SPACED REPETITION DUE</span>
+              </span>
+              <h3 className="text-xl font-black text-white tracking-tight leading-none pt-1">Today's Reviews</h3>
+              <p className="text-xs text-white/80 font-medium">{dueCount} {dueCount === 1 ? 'topic needs' : 'topics need'} revision</p>
+            </div>
+
+            <motion.button
+              whileHover={{ scale: 1.03 }}
+              whileTap={{ scale: 0.98 }}
+              onClick={onStartReviewSession}
+              className="px-5 py-2.5 bg-white text-[#9C13B3] text-xs font-black rounded-full shadow-md hover:bg-gray-50 flex items-center gap-2 cursor-pointer transition-transform duration-200"
+              id="start-review-session-btn"
+              style={{ minHeight: '44px' }}
+            >
+              <Play className="w-3 h-3 fill-current" />
+              <span>Start Review</span>
+            </motion.button>
+          </div>
+
+          {/* Brain Icon Illustration */}
+          <div className="text-6xl select-none filter drop-shadow-[0_10px_20px_rgba(123,19,147,0.5)] pr-2 animate-pulse">
+            🧠
+          </div>
+        </div>
+      )}
 
       {/* ==========================================
           3. CONTINUE LEARNING MAIN CARD

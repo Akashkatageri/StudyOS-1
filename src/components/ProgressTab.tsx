@@ -2,7 +2,8 @@ import React from 'react';
 import { UserState, Subject } from '../types';
 import { getLocalDateString } from '../utils/dateUtils';
 import { getLevelAndProgress } from '../utils/xpUtils';
-import { Calendar, Award, CheckCircle2, Zap, Flame, BookOpen, Clock, Shield } from 'lucide-react';
+import { getReviewStats } from '../lib/spacedRepetition';
+import { Calendar, Award, CheckCircle2, Zap, Flame, BookOpen, Clock, Shield, Brain } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 interface ProgressTabProps {
@@ -130,11 +131,13 @@ export default function ProgressTab({ userState, activeSubjects, backlogSubjects
     }
   ];
 
+  const srsStats = getReviewStats(userState.revisions || []);
+
   return (
     <div className="space-y-8 font-sans pb-16">
       
       {/* 1. STATS SUMMARY GRID */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Current Level */}
         <div className="bg-[#141A1F] border border-gray-800/80 rounded-2xl p-5 shadow-sm space-y-3">
           <div className="flex justify-between items-start">
@@ -202,7 +205,147 @@ export default function ProgressTab({ userState, activeSubjects, backlogSubjects
             <p className="text-[10px] text-gray-500 mt-1.5">Across {activeSubjects.length} subjects</p>
           </div>
         </div>
+
+        {/* Memory Retention */}
+        <div className="bg-[#141A1F] border border-[#7C5CFF]/25 rounded-2xl p-5 shadow-sm space-y-3 relative overflow-hidden group">
+          <div className="absolute top-0 right-0 w-24 h-24 bg-[#7C5CFF]/5 rounded-full blur-2xl pointer-events-none" />
+          <div className="flex justify-between items-start">
+            <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Memory Recall</span>
+            <Brain className="w-5 h-5 text-[#E892FF] fill-[#E892FF]/10" />
+          </div>
+          <div>
+            {(() => {
+              const pct = srsStats.retentionPercentage;
+              let rangeText = 'Excellent';
+              let rangeColor = 'text-green-400';
+              let indicator = '🟢';
+              if (pct >= 85) {
+                rangeText = 'Excellent';
+                rangeColor = 'text-green-400';
+                indicator = '🟢';
+              } else if (pct >= 70) {
+                rangeText = 'Good';
+                rangeColor = 'text-emerald-400';
+                indicator = '🟢';
+              } else if (pct >= 50) {
+                rangeText = 'Fair';
+                rangeColor = 'text-amber-400';
+                indicator = '🟡';
+              } else if (pct >= 30) {
+                rangeText = 'Weak';
+                rangeColor = 'text-orange-400';
+                indicator = '🟡';
+              } else {
+                rangeText = 'Poor';
+                rangeColor = 'text-rose-400';
+                indicator = '🔴';
+              }
+              return (
+                <div className="space-y-1">
+                  <div className="flex items-baseline gap-1.5 flex-wrap">
+                    <span className="text-lg font-mono font-bold text-white">{indicator} {rangeText}</span>
+                    <span className={`text-2xl font-black font-mono ${rangeColor}`}>{pct}%</span>
+                  </div>
+                </div>
+              );
+            })()}
+            <div className="w-full h-1.5 bg-gray-900 rounded-full overflow-hidden mt-2">
+              <div 
+                className="h-full bg-gradient-to-r from-[#7C5CFF] to-pink-500 rounded-full" 
+                style={{ width: `${srsStats.retentionPercentage}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-gray-500 mt-1.5">
+              {srsStats.totalScheduled} scheduled • {srsStats.reviewsDueToday} due today
+            </p>
+          </div>
+        </div>
       </div>
+
+      {/* SPACED REPETITION COGNITIVE PERFORMANCE DASHBOARD */}
+      {(() => {
+        const todayStr = getLocalDateString();
+        const revisions = userState.revisions || [];
+        
+        const topicsUnderReview = revisions.length;
+
+        const overdueReviewsCount = revisions.filter(
+          (rev) => rev.nextReview < todayStr && !(rev.lastReviewed === todayStr && rev.repetitions > 0)
+        ).length;
+
+        const hardTopicsMastered = revisions.filter(
+          (r) => r.learningDifficulty === 'hard' && r.repetitions > 0
+        ).length;
+
+        let averageRecallRating = 'Good';
+        if (srsStats.retentionPercentage >= 90) {
+          averageRecallRating = 'Excellent (😎 Easy)';
+        } else if (srsStats.retentionPercentage >= 75) {
+          averageRecallRating = 'Stable (🙂 Good)';
+        } else if (srsStats.retentionPercentage >= 60) {
+          averageRecallRating = 'Improving (😐 Hard)';
+        } else {
+          averageRecallRating = 'Developing (😖 Forgot)';
+        }
+
+        return (
+          <div className="bg-[#141A1F] border border-[#7C5CFF]/25 rounded-2xl p-6 shadow-md space-y-4 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-[#7C5CFF]/5 rounded-full blur-3xl pointer-events-none" />
+            
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold font-display text-white flex items-center gap-2">
+                <Brain className="w-5 h-5 text-purple-400 fill-purple-400/10" />
+                Spaced Repetition Scheduler
+              </h3>
+              <p className="text-xs text-gray-400">Track recall strength and cognitive memory retention milestones.</p>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Topics Under Review</span>
+                <p className="text-2xl font-black font-mono text-white mt-1">{topicsUnderReview}</p>
+                <p className="text-[10px] text-gray-500 mt-1">In active scheduler</p>
+              </div>
+
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Reviews Due Today</span>
+                <p className="text-2xl font-black font-mono text-[#A58BFF] mt-1">{srsStats.reviewsDueToday}</p>
+                <p className="text-[10px] text-gray-500 mt-1">Ready for study session</p>
+              </div>
+
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Overdue Reviews</span>
+                <p className={`text-2xl font-black font-mono mt-1 ${overdueReviewsCount > 0 ? 'text-rose-400' : 'text-gray-400'}`}>{overdueReviewsCount}</p>
+                <p className="text-[10px] text-gray-500 mt-1">Require immediate focus</p>
+              </div>
+
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Memory Recall Rate</span>
+                <p className="text-2xl font-black font-mono text-green-400 mt-1">{srsStats.retentionPercentage}%</p>
+                <p className="text-[10px] text-gray-500 mt-1">Cognitive stability</p>
+              </div>
+
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Current Review Streak</span>
+                <p className="text-2xl font-black font-mono text-amber-500 mt-1">{streak} Days</p>
+                <p className="text-[10px] text-gray-500 mt-1">Daily revision endurance</p>
+              </div>
+
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Avg Recall Quality</span>
+                <p className="text-base font-black font-display text-pink-400 mt-1 truncate">{averageRecallRating}</p>
+                <p className="text-[10px] text-gray-500 mt-1">Based on retention stability</p>
+              </div>
+
+              <div className="bg-[#0C0F12]/60 border border-gray-800/80 rounded-xl p-4.5 col-span-2">
+                <span className="text-[10px] text-gray-500 uppercase font-mono font-bold">Hard Topics Mastered</span>
+                <p className="text-2xl font-black font-mono text-indigo-400 mt-1">{hardTopicsMastered}</p>
+                <p className="text-[10px] text-gray-500 mt-1">🔴 Hard lessons successfully reviewed</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* 2. HEATMAP (GitHub Style) */}
       <div className="bg-[#141A1F] border border-gray-800/80 rounded-2xl p-6 shadow-md">

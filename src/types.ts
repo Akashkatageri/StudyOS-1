@@ -33,8 +33,18 @@ export interface Revision {
   subjectId: string;
   subjectName: string;
   topicName: string;
-  dueDate: string; // ISO String (Date only)
   completed: boolean;
+  learningDifficulty: "easy" | "medium" | "hard";
+  repetitions: number;
+  interval: number;
+  lastReviewed: string;
+  nextReview: string;
+  status: "scheduled" | "due";
+  completedAt: string;
+  dueDate?: string; // Keep for legacy / backward compatibility
+  easeFactor?: number; // Keep for legacy / backward compatibility
+  examImportant?: boolean; // Exam-important flag (Exam Mode priority)
+  history?: { date: string; rating: 'forgot' | 'hard' | 'good' | 'easy' }[]; // completed review history
 }
 
 export interface Achievement {
@@ -115,6 +125,12 @@ export interface UserState {
   lastFocusDate?: string | null; // YYYY-MM-DD
   focusHistory?: { [date: string]: number }; // YYYY-MM-DD -> minutes
   subjectDifficulties?: { [subjectId: string]: 'Easy' | 'Medium' | 'Hard' };
+  reviewStreak?: number;
+  longestReviewStreak?: number;
+  lastReviewDate?: string | null;
+  examModeActive?: boolean;
+  examDate?: string; // YYYY-MM-DD
+  examModeConfigDays?: number; // default: 14 days
 }
 
 export interface FriendProfile {

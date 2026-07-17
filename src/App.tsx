@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { UserState, Subject, Topic } from './types';
+import { UserState, Subject, Topic, Revision } from './types';
 import { getTemplateSubjects, COURSE_TEMPLATES, findTopicById } from './data';
 import { Home, ListCollapse, Users, User, Flame, ShieldAlert, Sparkles, Clock, X, Calendar, AlertCircle, Plus, Smartphone, Check, Loader2, ExternalLink, WifiOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -30,6 +30,8 @@ import { SoundManager } from './utils/soundManager';
 import { getLocalDateString } from './utils/dateUtils';
 import { syncAndroidWidget } from './utils/widgetSync';
 import { getLevelAndProgress, getDifficultyConfig } from './utils/xpUtils';
+import { createInitialRevision, updateRevisionScheduling, sanitizeRevisions, getDailyReviewQueue, addDaysToDateString } from './lib/spacedRepetition';
+import ReviewSessionView from './components/ReviewSessionView';
 
 // New Study Habit Components
 import { StudyCalendar } from './components/StudyCalendar';
@@ -119,6 +121,12 @@ export default function App() {
         const validTabs = ['home', 'progression', 'progress', 'friends', 'profile', 'settings'];
         if (!resolved.activeTab || !validTabs.includes(resolved.activeTab)) {
           resolved = { ...resolved, activeTab: 'home' };
+        }
+        if (resolved.revisions) {
+          resolved = {
+            ...resolved,
+            revisions: sanitizeRevisions(resolved.revisions),
+          };
         }
       }
       if (prev?.isOffline !== resolved?.isOffline) {
@@ -240,6 +248,9 @@ export default function App() {
   // Device Pairing State (Option A)
   const [pendingPairCode, setPendingPairCode] = useState<string | null>(null);
   const [isPairingModalOpen, setIsPairingModalOpen] = useState(false);
+
+  // Spaced Repetition State
+  const [isReviewSessionActive, setIsReviewSessionActive] = useState(false);
   const [isPairingLoading, setIsPairingLoading] = useState(false);
   const [pairingSuccess, setPairingSuccess] = useState(false);
   const [isRedirectChecking, setIsRedirectChecking] = useState(true);
@@ -356,7 +367,7 @@ export default function App() {
               setIsPairingModalOpen(false);
               setPendingPairCode(null);
               setPairingSuccess(false);
-            }, 5000);
+            }, 30000);
           } catch (err: any) {
             console.error("Auto silent pairing failed:", err);
           } finally {
@@ -372,8 +383,15 @@ export default function App() {
   useEffect(() => {
     if (pendingPairCode && userState && userState.uid && pairingSuccess) {
       const redirectTimer = setTimeout(() => {
-        window.location.href = "com.studyos.app://";
-      }, 1500);
+        const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+        if (isAndroid) {
+          console.log("[PAIRING] Android device detected. Redirecting via Android Intent URI...");
+          window.location.href = "intent://#Intent;scheme=com.studyos.app;package=com.studyos.app;end";
+        } else {
+          console.log("[PAIRING] Redirecting via Custom Scheme URL...");
+          window.location.href = "com.studyos.app://";
+        }
+      }, 1000);
       return () => clearTimeout(redirectTimer);
     }
   }, [pendingPairCode, userState, pairingSuccess]);
@@ -454,7 +472,7 @@ export default function App() {
         setIsPairingModalOpen(false);
         setPendingPairCode(null);
         setPairingSuccess(false);
-      }, 5000);
+      }, 30000);
     } catch (err: any) {
       console.error("Pairing confirmation failed:", err);
       setToast({
@@ -1410,6 +1428,10 @@ export default function App() {
   // If we are currently completing an automatic silent device pairing from Google Login
   if (pendingPairCode && userState && userState.uid) {
     const hasIdToken = !!(googleIdToken || sessionStorage.getItem('google_id_token'));
+    const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent);
+    const appRedirectUrl = isAndroid 
+      ? "intent://#Intent;scheme=com.studyos.app;package=com.studyos.app;end" 
+      : "com.studyos.app://";
 
     return (
       <div className="min-h-screen bg-[#060809] flex flex-col items-center justify-center p-6 text-center">
@@ -1423,10 +1445,18 @@ export default function App() {
 
           <div className="space-y-2">
             <h3 className="text-2xl font-bold text-white tracking-tight font-display">
-              {hasIdToken ? "Google Sign-In Successful!" : "Link Your Device"}
+              {pairingSuccess 
+                ? "Device Connected Successfully!" 
+                : hasIdToken 
+                  ? "Google Sign-In Successful!" 
+                  : "Link Your Device"}
             </h3>
             <p className="text-sm text-gray-400 leading-relaxed">
-              {hasIdToken ? (
+              {pairingSuccess ? (
+                <>
+                  Your mobile device has been securely connected to your account.
+                </>
+              ) : hasIdToken ? (
                 <>
                   You have successfully signed in with your Google Account <span className="text-blue-400 font-mono">({userState.email})</span>.
                 </>
@@ -1438,7 +1468,25 @@ export default function App() {
             </p>
           </div>
 
-          {hasIdToken ? (
+          {pairingSuccess ? (
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="p-5 bg-emerald-950/20 border border-emerald-500/30 rounded-xl space-y-3 text-center"
+            >
+              <div className="mx-auto w-12 h-12 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+                <Check className="w-6 h-6 animate-bounce" />
+              </div>
+              <div className="space-y-1">
+                <p className="text-sm font-bold text-emerald-400 font-sans">
+                  Sync Completed!
+                </p>
+                <p className="text-xs text-gray-400 leading-relaxed font-sans">
+                  The StudyOS app on your mobile device is now authorized.
+                </p>
+              </div>
+            </motion.div>
+          ) : hasIdToken ? (
             <div className="p-4 bg-emerald-950/20 border border-emerald-900/30 rounded-xl space-y-3">
               <p className="text-xs text-emerald-300 font-medium font-sans">
                 We are completing the secure connection on your mobile device.
@@ -1474,18 +1522,24 @@ export default function App() {
             </div>
           )}
 
-          {hasIdToken && (
+          {(pairingSuccess || hasIdToken) && (
             <div className="pt-2 space-y-4">
               <a
-                href="com.studyos.app://"
-                className="w-full py-3 bg-blue-600 hover:bg-blue-500 active:scale-98 text-white text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-lg shadow-blue-600/20"
+                href={appRedirectUrl}
+                className={`w-full py-3.5 text-white text-xs font-black uppercase tracking-widest rounded-xl transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg ${
+                  pairingSuccess 
+                    ? "bg-gradient-to-r from-emerald-500 to-teal-600 hover:brightness-110 shadow-emerald-500/20 animate-pulse" 
+                    : "bg-blue-600 hover:bg-blue-500 shadow-blue-600/20"
+                }`}
               >
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Open StudyOS App</span>
+                <ExternalLink className="w-4 h-4" />
+                <span>Return to StudyOS App</span>
               </a>
 
               <p className="text-[11px] text-gray-500 leading-relaxed font-sans">
-                If the app doesn't open automatically, click the button above or manually return to the StudyOS app on your phone.
+                {pairingSuccess 
+                  ? "Returning you back to the app automatically... If the app does not open, click the button above."
+                  : "If the app doesn't open automatically, click the button above or manually return to the StudyOS app on your phone."}
               </p>
             </div>
           )}
@@ -1641,7 +1695,7 @@ export default function App() {
   };
 
   // 6. Complete active topic state transition
-  const handleMarkTopicCompleted = (topicId: string) => {
+  const handleMarkTopicCompleted = (topicId: string, difficulty?: 'easy' | 'medium' | 'hard') => {
     if (!userState) return;
 
     const allLookupSubjects = [...activeSubjects, ...backlogSubjects];
@@ -1722,26 +1776,40 @@ export default function App() {
     let newXp = userState.xp + addedXp;
     let newLevel = getLevelAndProgress(newXp).level;
 
-    // Revision Scheduler: Automatically schedules revisions
-    const alreadyScheduled = (userState.revisions || []).some((r) => r.topicId === topicId);
-    if (!alreadyScheduled && !isAlreadyCompleted) {
-      const revDate = new Date();
-      revDate.setDate(revDate.getDate() + diffConfig.revisionDays);
-      const revisionDateStr = getLocalDateString(revDate);
-
-      updatedRevisions.push({
-        id: `rev-${topicId}-${Date.now()}`,
-        topicId: topicId,
-        subjectId: subject.id,
-        subjectName: subject.name,
-        topicName: topic.name,
-        dueDate: revisionDateStr,
-        completed: false,
-      });
+    // Revision Scheduler: Automatically schedules revisions OR edits learning difficulty if already completed
+    const alreadyScheduledIndex = (userState.revisions || []).findIndex((r) => r.topicId === topicId);
+    if (alreadyScheduledIndex === -1 && !isAlreadyCompleted) {
+      const initialRev = createInitialRevision(topicId, subject.id, subject.name, topic.name, difficulty || 'medium');
+      updatedRevisions.push(initialRev);
+    } else if (alreadyScheduledIndex !== -1) {
+      const rev = updatedRevisions[alreadyScheduledIndex];
+      const prevDiff = rev.learningDifficulty;
+      if (difficulty && difficulty !== prevDiff) {
+        let updatedInterval = rev.interval;
+        let updatedNextReview = rev.nextReview;
+        // If reps is 0, update future review scheduling by calculating the new initial interval
+        if ((rev.repetitions || 0) === 0) {
+          if (difficulty === 'easy') {
+            updatedInterval = 3;
+          } else if (difficulty === 'medium') {
+            updatedInterval = 2;
+          } else if (difficulty === 'hard') {
+            updatedInterval = 1;
+          }
+          updatedNextReview = addDaysToDateString(rev.lastReviewed || getLocalDateString(), updatedInterval);
+        }
+        updatedRevisions[alreadyScheduledIndex] = {
+          ...rev,
+          learningDifficulty: difficulty,
+          interval: updatedInterval,
+          nextReview: updatedNextReview,
+          dueDate: updatedNextReview,
+        };
+      }
     }
 
     // Set standard animation triggers
-    let triggeredCelebration: 'topic' | 'module' | 'semester' | null = 'topic';
+    let triggeredCelebration: 'topic' | 'module' | 'semester' | null = isAlreadyCompleted ? null : 'topic';
 
     // Check Module Completion
     const updatedCompletedModules = [...(userState.completedModules || [])];
@@ -1802,17 +1870,26 @@ export default function App() {
     const totalTopicsInModule = module.topics.length;
     const moduleProgressPercent = Math.round((completedTopicsInModule / totalTopicsInModule) * 100);
 
-    setCelebrationDetails({
-      xpEarned: triggeredCelebration === 'module' ? (addedXp + 250) : addedXp,
-      moduleName: module.name,
-      moduleProgress: moduleProgressPercent,
-    });
+    if (!isAlreadyCompleted) {
+      setCelebrationDetails({
+        xpEarned: triggeredCelebration === 'module' ? (addedXp + 250) : addedXp,
+        moduleName: module.name,
+        moduleProgress: moduleProgressPercent,
+      });
 
-    setToast({
-      title: "🔥 Study Goal Secured!",
-      message: `You earned +${addedXp} XP and protected your ${newStreak}-day streak!`,
-      type: "success"
-    });
+      setToast({
+        title: "🔥 Study Goal Secured!",
+        message: `You earned +${addedXp} XP and protected your ${newStreak}-day streak!`,
+        type: "success"
+      });
+      setCelebrationType(triggeredCelebration);
+    } else {
+      setToast({
+        title: "⚙️ Difficulty Updated",
+        message: `Learning difficulty set to ${difficulty?.toUpperCase()}. Future schedules adjusted.`,
+        type: "success"
+      });
+    }
 
     saveState(updatedState);
     setActiveTopicId(null);
@@ -1978,6 +2055,85 @@ export default function App() {
     }
   };
 
+  const handleCompleteReviewTopic = (revision: Revision, rating: 'forgot' | 'hard' | 'good' | 'easy') => {
+    if (!userState) return;
+
+    const revisionsList = userState.revisions || [];
+    const revisionIndex = revisionsList.findIndex((r) => r.id === revision.id);
+    if (revisionIndex === -1) return;
+
+    // Experience Award: Revision Completion = 15 XP
+    let newXp = (userState.xp || 0) + 15;
+    let newLevel = getLevelAndProgress(newXp).level;
+
+    // Streak tracker updates
+    const todayStr = getLocalDateString();
+    const lastActiveStr = userState.lastActiveDate;
+    
+    let newStreak = userState.streak || 0;
+    if (lastActiveStr !== todayStr) {
+      if (!lastActiveStr) {
+        newStreak = 1;
+      } else {
+        const diffDays = getDaysDifference(lastActiveStr, todayStr);
+        
+        if (diffDays === 1) {
+          newStreak += 1;
+        } else {
+          newStreak = 1;
+        }
+      }
+    }
+    const newLongestStreak = Math.max(userState.longestStreak || 0, newStreak);
+
+    // Track study activity completions counts
+    const studyActivityMap = userState.studyActivity || {};
+    const currentActivityCount = studyActivityMap[todayStr] || 0;
+    const updatedStudyActivity = {
+      ...studyActivityMap,
+      [todayStr]: currentActivityCount + 1,
+    };
+
+    // Calculate updated revision scheduling
+    const updatedRev = updateRevisionScheduling(revision, rating);
+
+    const updatedRevisions = [...revisionsList];
+    updatedRevisions[revisionIndex] = updatedRev;
+
+    const updatedState: UserState = {
+      ...userState,
+      xp: newXp,
+      level: newLevel,
+      streak: newStreak,
+      longestStreak: newLongestStreak,
+      academicStudyStreak: newStreak,
+      longestStudyStreak: Math.max(userState.longestStudyStreak || 0, newStreak),
+      lastActiveDate: todayStr,
+      lastFocusDate: todayStr,
+      revisions: updatedRevisions,
+      studyActivity: updatedStudyActivity,
+    };
+
+    saveState(updatedState);
+
+    setToast({
+      title: "✨ Recall Boosted!",
+      message: `Revision scheduled: ${rating.toUpperCase()}! +15 XP earned.`,
+      type: "success"
+    });
+
+    // Sync social milestones
+    if (updatedState.uid) {
+      if (updatedState.level > userState.level) {
+        triggerSocialMilestone(updatedState, 'level', updatedState.level).catch(console.error);
+      }
+      const milestoneDays = [3, 5, 7, 10, 15, 20, 30, 45, 50, 75, 100];
+      if (updatedState.streak > userState.streak && milestoneDays.includes(updatedState.streak)) {
+        triggerSocialMilestone(updatedState, 'streak', updatedState.streak).catch(console.error);
+      }
+    }
+  };
+
   const handleImportState = (imported: UserState) => {
     saveState(imported);
   };
@@ -2043,6 +2199,11 @@ export default function App() {
             onOpenStudyCalendar={() => setIsStudyCalendarOpen(true)}
             onTriggerSemesterTransition={handleTriggerSemesterTransition}
             onUpdateState={handleUpdateState}
+            onStartReviewSession={() => {
+              SoundManager.play('click');
+              SoundManager.vibrate('light');
+              setIsReviewSessionActive(true);
+            }}
             hasActiveNotifications={hasPendingRequests || hasUnreadNotifs}
           />
         )}
@@ -2106,16 +2267,34 @@ export default function App() {
           isRevisionDue={(userState.revisions || []).some(
             (r) =>
               r.topicId === activeTopicId &&
-              !r.completed &&
-              r.dueDate <= getLocalDateString()
+              r.nextReview <= getLocalDateString()
           )}
           onClose={() => setActiveTopicId(null)}
           onMarkCompleted={handleMarkTopicCompleted}
+          onCompleteRevision={(topicId, rating) => {
+            const rev = (userState.revisions || []).find(r => r.topicId === topicId);
+            if (rev) {
+              handleCompleteReviewTopic(rev, rating);
+            }
+            setActiveTopicId(null);
+          }}
           onStartFocusTimer={(topicName) => {
             setActiveTopicId(null);
             setIsFocusTimerOpen(true);
             setIsMinimizedFocusTimer(false);
             setFocusTimerTopicName(topicName);
+          }}
+          onToggleExamImportant={(topicId, examImportant) => {
+            const updatedRevisions = (userState.revisions || []).map((r) => {
+              if (r.topicId === topicId) {
+                return { ...r, examImportant };
+              }
+              return r;
+            });
+            saveState({
+              ...userState,
+              revisions: updatedRevisions,
+            });
           }}
         />
       )}
@@ -2764,6 +2943,18 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Spaced Repetition Review Session Overlay */}
+      {isReviewSessionActive && userState && (
+        <ReviewSessionView
+          dueRevisions={getDailyReviewQueue(userState.revisions || [])}
+          userState={userState}
+          activeSubjects={activeSubjects}
+          backlogSubjects={backlogSubjects}
+          onCompleteReview={handleCompleteReviewTopic}
+          onClose={() => setIsReviewSessionActive(false)}
+        />
+      )}
 
     </div>
   );
