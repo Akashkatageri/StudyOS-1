@@ -242,16 +242,57 @@ export default function AuthRouter({ initialUser, onAuthComplete }: AuthRouterPr
     setAuthError(null);
     setRedirectWarning(null);
 
-    // If running inside a native environment (Android app), trigger standard Google Sign-In via redirect directly
+    // If running inside a native environment (Android app), trigger native Google Sign-In via Capawesome
     if (typeof window !== 'undefined' && Capacitor.isNativePlatform()) {
       try {
-        console.log("[AuthRouter] Native platform detected. Triggering standard direct Google signInWithRedirect...");
-        googleProvider.setCustomParameters({ prompt: 'select_account' });
-        await signInWithRedirect(auth, googleProvider);
+        console.log("[AuthRouter] Native platform detected. Triggering native Google Sign-In via Capawesome...");
+        const { FirebaseAuthentication } = await import('@capacitor-firebase/authentication');
+        const result = await FirebaseAuthentication.signInWithGoogle({});
+        
+        const idToken = result.credential?.idToken;
+        if (!idToken) {
+          throw new Error("No Google ID token was returned from native sign-in.");
+        }
+        
+        console.log("[AuthRouter] Native Google Sign-In success, signing into Firebase Web SDK with credential...");
+        const credential = GoogleAuthProvider.credential(idToken);
+        const userCredential = await signInWithCredential(auth, credential);
+        
+        const user = userCredential.user;
+        const email = user.email || undefined;
+        const displayName = user.displayName || undefined;
+        const uid = user.uid;
+        
+        console.log("[AuthRouter] Firebase Web SDK Native Sign-In success. Loading user Firestore...");
+        let cloudData = null;
+        try {
+          cloudData = await loadUserFromFirestore(uid);
+        } catch (dbErr: any) {
+          console.error("Database check failed during Google Sign-In:", dbErr);
+          throw new Error(
+            "Failed to connect to the cloud database. Please verify your internet connection and Firestore setup."
+          );
+        }
+
+        if (cloudData && cloudData.onboarded) {
+          onAuthComplete({
+            uid,
+            email,
+            displayName,
+            isOffline: false,
+            username: cloudData.username,
+            onboarded: true,
+            fullState: cloudData
+          });
+          return;
+        }
+
+        setAuthData({ uid, email, displayName });
+        setStep('username');
       } catch (err: any) {
         console.error("Failed to initialize direct native Google Sign-In:", err);
         setAuthError({
-          message: "Failed to initialize Google Sign-In. Please check your internet connection: " + (err.message || String(err))
+          message: "Failed to initialize native Google Sign-In. Please check your internet connection and Firebase config: " + (err.message || String(err))
         });
       } finally {
         setIsLoadingAuth(false);
