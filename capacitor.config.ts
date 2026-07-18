@@ -1,6 +1,6 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-const config: CapacitorConfig = {
+const config: any = {
   appId: 'com.studyos.app',
   appName: 'StudyOS',
   webDir: 'dist',
@@ -13,4 +13,4 @@ const config: CapacitorConfig = {
   }
 };
 
-export default config;
+export default config as CapacitorConfig;
