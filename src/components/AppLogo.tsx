@@ -14,14 +14,8 @@ export default function AppLogo({ className = "w-full h-full", size, transparent
       className={className}
       style={size ? { width: size, height: size } : undefined}
     >
-      <defs>
-        <linearGradient id="purple-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-          <stop offset="0%" stopColor="#8B5CF6" />
-          <stop offset="100%" stopColor="#6C63FF" />
-        </linearGradient>
-      </defs>
-      {/* Premium Purple Gradient Background (can be bypassed for transparent layouts) */}
-      {!transparent && <rect width="512" height="512" rx="112" fill="url(#purple-grad)" />}
+      {/* Solid Black Background for modern look (can be bypassed for transparent layouts) */}
+      {!transparent && <rect width="512" height="512" rx="112" fill="#000000" />}
 
       <g stroke="#ffffff" strokeWidth={12} strokeLinecap="round" strokeLinejoin="round" fill="none">
         {/* Lightbulb */}
