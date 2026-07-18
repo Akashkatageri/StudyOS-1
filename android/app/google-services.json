@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "993152230783-47npndkjak975f8hofhkr115i8ga9ceu.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.studyos.app",
+            "certificate_hash": "8ae3f392c9141336d113ddcab3ee2ce92581f8ab"
+          }
+        },
+        {
           "client_id": "993152230783-jtjkab5idog3p6v70l7psgnvtppthapa.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
