@@ -293,8 +293,15 @@ export default function AuthRouter({ initialUser, onAuthComplete }: AuthRouterPr
         setStep('username');
       } catch (err: any) {
         console.error("Failed to initialize direct native Google Sign-In:", err);
+        const errMsg = err.message || String(err);
+        let userFriendlyMsg = "Failed to initialize native Google Sign-In. Please check your internet connection and Firebase config: " + errMsg;
+        
+        if (errMsg.includes("10:") || errMsg.includes("10 ") || errMsg.includes("DeveloperError") || errMsg.includes("DEVELOPER_ERROR")) {
+          userFriendlyMsg = "Google Sign-In Error (Developer Error 10). The SHA-1 signing fingerprint of your local app build does not match the one registered in your Firebase Console. Please register your local machine's SHA-1 in the Firebase Console and replace android/app/google-services.json.";
+        }
+        
         setAuthError({
-          message: "Failed to initialize native Google Sign-In. Please check your internet connection and Firebase config: " + (err.message || String(err))
+          message: userFriendlyMsg
         });
       } finally {
         setIsLoadingAuth(false);
