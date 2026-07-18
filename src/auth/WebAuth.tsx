@@ -43,7 +43,7 @@ export default function WebAuth({
       className="space-y-6 text-center"
     >
       {/* App Brand Icon */}
-      <div className="mx-auto w-20 h-20 rounded-3xl overflow-hidden shadow-[0_0_30px_rgba(59,130,246,0.3)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-blue-500 to-indigo-600 border border-blue-400/20 p-2.5">
+      <div className="mx-auto w-20 h-20 rounded-3xl overflow-hidden shadow-[0_0_30px_rgba(139,92,246,0.3)] hover:scale-105 transition-transform duration-300 flex items-center justify-center bg-gradient-to-br from-[#8B5CF6] to-[#6C63FF] border border-purple-500/20 p-2.5">
         <AppLogo className="w-full h-full animate-fade-in" transparent={true} />
       </div>
 

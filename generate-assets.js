@@ -4,8 +4,14 @@ import sharp from 'sharp';
 
 const SVG_WITH_BG = `<?xml version="1.0" encoding="utf-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-  <!-- Solid Black Background for modern look -->
-  <rect width="512" height="512" rx="112" fill="#000000" />
+  <defs>
+    <linearGradient id="purple-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#8B5CF6" />
+      <stop offset="100%" stop-color="#6C63FF" />
+    </linearGradient>
+  </defs>
+  <!-- Premium Purple Gradient Background -->
+  <rect width="512" height="512" rx="112" fill="url(#purple-grad)" />
 
   <g stroke="#ffffff" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" fill="none">
     <!-- Lightbulb -->
