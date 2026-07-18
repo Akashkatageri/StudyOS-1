@@ -1,5 +1,13 @@
 {
 	"appId": "com.studyos.app",
 	"appName": "StudyOS",
-	"webDir": "dist"
+	"webDir": "dist",
+	"plugins": {
+		"FirebaseAuthentication": {
+			"providers": [
+				"google.com"
+			],
+			"skipNativeAuth": false
+		}
+	}
 }
